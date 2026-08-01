@@ -1,0 +1,33 @@
+# dependencies
+node_modules
+
+# build output
+dist
+dist-ssr
+*.tsbuildinfo
+
+# env
+.env
+.env.local
+
+# editor
+**/.vscode/*
+!**/.vscode/extensions.json
+.idea
+
+# logs
+*.log
+npm-debug.log*
+
+# os
+.DS_Store
+
+# python
+.venv/
+__pycache__/
+*.pyc
+backend/storage/
+
+# claude
+**/.claude/*
+!**/.claude/launch.json
