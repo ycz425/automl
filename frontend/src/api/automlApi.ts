@@ -30,6 +30,11 @@ async function requestJson<T>(
     throw new AppError(message);
   }
 
+  // 204 No Content has no body to parse — trying to anyway throws.
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
   try {
     return (await response.json()) as T;
   } catch (error) {
@@ -121,5 +126,13 @@ export async function deleteDataset(datasetId: string, signal?: AbortSignal): Pr
     buildUrl(`/dataset/${encodeURIComponent(datasetId)}/delete`),
     { method: "DELETE", signal },
     "Failed to delete the uploaded dataset."
+  );
+}
+
+export async function deleteStatus(threadId: string, signal?: AbortSignal): Promise<void> {
+  await requestJson<unknown>(
+    buildUrl(`/status/${encodeURIComponent(threadId)}/delete`),
+    { method: "DELETE", signal },
+    "Failed to delete the run's status."
   );
 }

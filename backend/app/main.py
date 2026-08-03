@@ -63,7 +63,7 @@ async def start_automl(request: StartAutoMLRequest, background_tasks: Background
 
 @app.post("/automl/{thread_id}/resume", response_model=RunAutoMLResponse, status_code=202)
 async def resume_automl(thread_id: str, request: ResumeAutoMLRequest, background_tasks: BackgroundTasks):
-    if not (await automl_service._exists(thread_id)):
+    if not (await automl_service.exists(thread_id)):
         raise HTTPException(
             status_code=404,
             detail="AutoML thread not found"
@@ -85,33 +85,27 @@ async def stream_status(thread_id: str):
             status_code=404,
             detail="AutoML thread not found"
         )
-    yield AutoMLResponse(status=status['status'], node=status['node'], message=status['message'])
 
-    if status["status"] in {
-        "completed",
-        "failed"
-    }:
-        return
+    event, watch = await automl_service.status_store.subscribe(thread_id)
+    try:
+        while True:
+            await event.wait()
+            event.clear()
+            status = await automl_service.get_status(thread_id)
+            if status is None:
+                return
+            status = await automl_service.get_status(thread_id)
+            yield AutoMLResponse(status=status['status'], node=status['node'], message=status['message'])
 
-
-    event = automl_service.status_store.get_event(thread_id)
-    while True:
-        await event.wait()
-        event.clear()
-        status = await automl_service.get_status(thread_id)
-        if status is None:
-            return
-        status = await automl_service.get_status(thread_id)
-        yield AutoMLResponse(status=status['status'], node=status['node'], message=status['message'])
-
-        if status["status"] in {
-            "completed",
-            "failed"
-        }:
-            return
+            if status["status"] in {
+                "completed",
+                "failed"
+            }:
+                return
+    finally:
+        watch.unsubscribe()
 
         
-
 @app.post("/dataset/upload", response_model=DatasetUploadResponse, status_code=201)
 async def upload_dataset(file: Annotated[UploadFile, File()]):
     _, ext = os.path.splitext(file.filename.lower())
@@ -143,7 +137,7 @@ async def download_artifact(thread_id: str, filename: str):
 @app.delete("/artifact/{thread_id}/delete", status_code=204)
 async def delete_artifacts(thread_id: str):
     if not (await automl_service.file_storage.run_exists(thread_id)):
-        return HTTPException(
+        raise HTTPException(
             status_code=404,
             detail="Artifacts not found"
         )
@@ -153,8 +147,18 @@ async def delete_artifacts(thread_id: str):
 @app.delete("/dataset/{dataset_id}/delete", status_code=204)
 async def delete_dataset(dataset_id: str):
     if not (await automl_service.file_storage.dataset_exists(dataset_id)):
-        return HTTPException(
+        raise HTTPException(
             status_code=404,
             detail="Dataset not found"
         )
     await automl_service.file_storage.delete_dataset(dataset_id)
+
+
+@app.delete("/status/{thread_id}/delete", status_code=204)
+async def delete_status(thread_id: str):
+    if not (await automl_service.status_store.exists(thread_id)):
+        raise HTTPException(
+            status_code=404,
+            detail="AutoML thread not found"
+        )
+    await automl_service.status_store.delete(thread_id)

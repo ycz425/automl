@@ -2,6 +2,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import {
   deleteArtifacts,
   deleteDataset,
+  deleteStatus,
   getArtifactDownloadUrl,
   getArtifacts,
   resumeAutoML,
@@ -421,6 +422,7 @@ export function useAutoMLChat() {
     // don't surface failures since the session is being discarded regardless.
     if (threadId) {
       deleteArtifacts(threadId).catch(() => {});
+      deleteStatus(threadId).catch(() => {});
     }
     if (datasetId) {
       deleteDataset(datasetId).catch(() => {});

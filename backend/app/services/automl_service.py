@@ -3,14 +3,14 @@ from langgraph.types import Command
 from app.graph.schemas.state import AutoMLState
 from app.graph.graph import graph
 from app.graph.context import AutoMLContext
-from app.services.status_store import StatusStore
+from app.services.status_store import FirestoreStatusStore
 from app.services.local_file_storage import LocalFileStorage
 
 
 class AutoMLService:
     def __init__(self, graph: CompiledStateGraph,):
         self.graph = graph
-        self.status_store = StatusStore()
+        self.status_store = FirestoreStatusStore()
         self.file_storage = LocalFileStorage()
 
     async def start(self, user_input: str, dataset_id: str, thread_id: str):
@@ -26,7 +26,8 @@ class AutoMLService:
         except:
             await self.status_store.update(
                 thread_id,
-                status='failed'
+                status='failed',
+                message='Failed.'
             )
     
     async def resume(self, user_input: str, thread_id: str):
@@ -36,12 +37,13 @@ class AutoMLService:
         except:
             await self.status_store.update(
                 thread_id,
-                status='failed'
+                status='failed',
+                message='Failed.'
             )
 
 
     async def get_status(self, thread_id: str):
-        if not (await self._exists(thread_id)):
+        if not (await self.exists(thread_id)):
             return None
         status = await self.status_store.get_status(thread_id)
         node = await self.status_store.get_node(thread_id)
@@ -53,7 +55,7 @@ class AutoMLService:
             'message': message
         }
 
-    async def _exists(self, thread_id: str):
+    async def exists(self, thread_id: str):
         return (await self.graph.checkpointer.aget_tuple(self._config(thread_id))) is not None
         
     def _context(self):
