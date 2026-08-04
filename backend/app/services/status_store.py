@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Literal
 import asyncio
 from google.cloud import firestore
+from datetime import datetime, timedelta, timezone
 import dotenv
 import os
 
@@ -39,7 +40,8 @@ class StatusStore:
         if not snapshot.exists:
             if status is None or node is None:
                 raise ValueError
-            await document.set({'status': status, 'node': node, 'message': message})
+            expires_at = datetime.now(timezone.utc) + timedelta(days=1)
+            await document.set({'status': status, 'node': node, 'message': message, 'expires_at': expires_at})
         else:
             status_update = {}
             if status is not None:
