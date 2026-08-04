@@ -43,7 +43,11 @@ app = FastAPI()
 from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["automl-504220.web.app", "automl-504220.firebaseapp.com"],
+    allow_origins=[
+        "http://localhost:5173",
+        "https://automl-504220.web.app",
+        "https://automl-504220.firebaseapp.com",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
