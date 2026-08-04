@@ -73,7 +73,7 @@ class StatusStore:
         event = asyncio.Event()
         loop = asyncio.get_running_loop()
         def callback(snapshot, changes, read_time):
-            if snapshot[0].exists:
+            if snapshot and snapshot[0].exists:
                 loop.call_soon_threadsafe(event.set)
 
         return event, self.sync_collection.document(thread_id).on_snapshot(callback)
