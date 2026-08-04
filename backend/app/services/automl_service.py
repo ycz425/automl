@@ -3,15 +3,15 @@ from langgraph.types import Command
 from app.graph.schemas.state import AutoMLState
 from app.graph.graph import graph
 from app.graph.context import AutoMLContext
-from app.services.status_store import FirestoreStatusStore
-from app.services.local_file_storage import LocalFileStorage
+from app.services.status_store import StatusStore
+from app.services.file_storage import FileStorage
 
 
 class AutoMLService:
     def __init__(self, graph: CompiledStateGraph,):
         self.graph = graph
-        self.status_store = FirestoreStatusStore()
-        self.file_storage = LocalFileStorage()
+        self.status_store = StatusStore()
+        self.file_storage = FileStorage()
 
     async def start(self, user_input: str, dataset_id: str, thread_id: str):
         config = self._config(thread_id)
@@ -21,25 +21,27 @@ class AutoMLService:
             verbose=True
         )
         await self.file_storage.make_run_directory(thread_id)
-        try:
-            await self.graph.ainvoke(initial_state, config=config, context=self._context())
-        except:
-            await self.status_store.update(
-                thread_id,
-                status='failed',
-                message='Failed.'
-            )
+        await self.graph.ainvoke(initial_state, config=config, context=self._context())
+        # try:
+        #     await self.graph.ainvoke(initial_state, config=config, context=self._context())
+        # except:
+        #     await self.status_store.update(
+        #         thread_id,
+        #         status='failed',
+        #         message='Failed.'
+            # )
     
     async def resume(self, user_input: str, thread_id: str):
         config = self._config(thread_id)
-        try:
-            await self.graph.ainvoke(Command(resume=user_input), config=config, context=self._context())
-        except:
-            await self.status_store.update(
-                thread_id,
-                status='failed',
-                message='Failed.'
-            )
+        await self.graph.ainvoke(Command(resume=user_input), config=config, context=self._context())
+        # try:
+        #     await self.graph.ainvoke(Command(resume=user_input), config=config, context=self._context())
+        # except:
+        #     await self.status_store.update(
+        #         thread_id,
+        #         status='failed',
+        #         message='Failed.'
+        #     )
 
 
     async def get_status(self, thread_id: str):

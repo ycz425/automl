@@ -3,6 +3,10 @@ from fastapi import UploadFile
 from typing import Literal
 import shutil
 import os
+import dotenv
+
+dotenv.load_dotenv()
+STORAGE_ROOT = os.getenv('STORAGE_ROOT')
 
 
 type ArtifactType = Literal[
@@ -13,8 +17,8 @@ type ArtifactType = Literal[
 ]
 
 
-class LocalFileStorage:
-    def __init__(self, root_directory: str ='storage'):
+class FileStorage:
+    def __init__(self, root_directory: str = STORAGE_ROOT):
         self.root_directory = Path(root_directory)
 
         self.datasets_directory = self.root_directory / 'datasets'
@@ -69,5 +73,5 @@ class LocalFileStorage:
     async def run_exists(self, thread_id: str):
             return (await self.get_run_directory(thread_id)).exists()
 
-local_file_storage = LocalFileStorage()
+local_file_storage = FileStorage()
 

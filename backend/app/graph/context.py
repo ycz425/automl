@@ -1,9 +1,9 @@
-from app.services.status_store import LocalStatusStore
-from app.services.local_file_storage import LocalFileStorage
+from app.services.status_store import StatusStore
+from app.services.file_storage import FileStorage
 from dataclasses import dataclass
 
 
 @dataclass
 class AutoMLContext:
-    status_store: LocalStatusStore
-    file_storage: LocalFileStorage
+    status_store: StatusStore
+    file_storage: FileStorage

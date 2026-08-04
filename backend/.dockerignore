@@ -1,0 +1,20 @@
+# secrets — never bake these into the image
+.env
+.env.*
+
+# runtime data — populated at runtime, not build time
+storage/
+mnt/
+
+# local test/dev scaffolding
+.venv/
+__pycache__/
+*.pyc
+
+# vcs / editor
+.git/
+.gitignore
+.claude/
+.vscode/
+.idea/
+.DS_Store
