@@ -3,6 +3,8 @@ from app.graph.schemas.user_request import UserRequest
 from app.graph.schemas.data_info import DatasetProfile, DatasetAnalysis
 from app.graph.schemas.plan import Plan
 from app.graph.schemas.experiment import Experiment
+from app.services.tracing import traced_interactions_create
+from langsmith import traceable
 from pydantic import ValidationError
 from datetime import datetime
 import json
@@ -19,6 +21,7 @@ class PlanAgent():
         self.model = model
         self.verbose = verbose
 
+    @traceable(name="PlanAgent.plan")
     async def plan(self, user_request: UserRequest, dataset_profile: DatasetProfile, dataset_analysis: DatasetAnalysis, experiments: list[Experiment], max_retries=5):
         if self.verbose:
             print(f'{datetime.now()}     planning...')
@@ -63,7 +66,8 @@ class PlanAgent():
                     "Return a corrected response that strictly matches the required schema.\n"
                 )
 
-            interaction = await self.client.aio.interactions.create(
+            interaction = await traced_interactions_create(
+                self.client,
                 model=self.model,
                 input=prompt,
                 generation_config={

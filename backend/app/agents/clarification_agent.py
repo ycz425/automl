@@ -1,5 +1,7 @@
 from google import genai
 from app.graph.schemas.clarification_request import ClarificationRequest
+from app.services.tracing import traced_interactions_create
+from langsmith import traceable
 from pydantic import ValidationError, BaseModel
 from app.graph.schemas.llm_output import LLMOutput
 from datetime import datetime
@@ -16,6 +18,7 @@ class ClarificationAgent():
         self.model = model
         self.verbose = verbose
 
+    @traceable(name="ClarificationAgent.clarify")
     async def clarify(self, data: BaseModel, clarification_request: ClarificationRequest, user_clarification: str, output_model: type[LLMOutput], max_retries=5):
         validation_error = None
         for attempt in range(max_retries + 1):
@@ -45,7 +48,8 @@ class ClarificationAgent():
                     f"{validation_error}\n\n"
                     "Return a corrected response that strictly matches the required schema.\n"
                 )
-            interaction = await self.client.aio.interactions.create(
+            interaction = await traced_interactions_create(
+                self.client,
                 model=self.model,
                 input=prompt,
                 generation_config={

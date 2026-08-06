@@ -2,6 +2,8 @@ from google import genai
 from app.graph.schemas.user_request import UserRequest, Metric
 from app.graph.schemas.experiment import Experiment
 from app.graph.schemas.output import OutputScripts
+from app.services.tracing import traced_interactions_create
+from langsmith import traceable
 from pydantic import ValidationError
 from datetime import datetime
 import pandas as pd
@@ -47,6 +49,7 @@ class OutputAgent():
         else:
             return best_experiment
     
+    @traceable(name="OutputAgent.generate_scripts")
     async def generate_scripts(self, user_request: UserRequest, experiment: Experiment, max_retries=5):
         if self.verbose:
             print(f'{datetime.now()}     generating scripts...')
@@ -88,7 +91,8 @@ class OutputAgent():
                     "Return a corrected response that strictly matches the required schema.\n"
                 )
 
-            interaction = await self.client.aio.interactions.create(
+            interaction = await traced_interactions_create(
+                self.client,
                 model=self.model,
                 input=prompt,
                 generation_config={
@@ -109,6 +113,7 @@ class OutputAgent():
                 if self.verbose:
                     print(f'{datetime.now()}     OutputScripts model validation failed - retrying... (attempt: {attempt + 1}/{max_retries})')
 
+    @traceable(name="OutputAgent.repair_scripts")
     async def repair_scripts(self, scripts: OutputScripts, error_message: str, experiment: Experiment, max_retries=5):
         if self.verbose:
             print(f'{datetime.now()}     repairing scripts...')
@@ -151,7 +156,8 @@ class OutputAgent():
                     "Return a corrected response that strictly matches the required schema.\n"
                 )
 
-            interaction = await self.client.aio.interactions.create(
+            interaction = await traced_interactions_create(
+                self.client,
                 model=self.model,
                 input=prompt,
                 generation_config={
@@ -191,6 +197,7 @@ class OutputAgent():
             )
             pd.read_csv(test_output)
 
+    @traceable(name="OutputAgent.generate_summary")
     async def generate_summary(self, user_request: UserRequest, experiments: list[Experiment]):
         best_experiment_idx = self.best_experiment(user_request.primary_metric, experiments, return_index=True)
 
@@ -219,7 +226,8 @@ class OutputAgent():
         - Return only the final summary using markdown.
         """
 
-        interaction = await self.client.aio.interactions.create(
+        interaction = await traced_interactions_create(
+            self.client,
             model=self.model,
             input=prompt,
             generation_config={
@@ -230,6 +238,7 @@ class OutputAgent():
 
         return interaction.output_text
 
+    @traceable(name="OutputAgent.generate_output")
     async def generate_output(self, user_request: UserRequest, experiments: list[Experiment], data_path: str, output_dir="out", max_retries=5):
         best_experiment = self.best_experiment(user_request.primary_metric, experiments)
         output_scripts = await self.generate_scripts(user_request, best_experiment)

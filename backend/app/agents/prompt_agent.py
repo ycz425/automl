@@ -1,5 +1,7 @@
 from google import genai
 from app.graph.schemas.user_request import prompt_parse_output
+from app.services.tracing import traced_interactions_create
+from langsmith import traceable
 from pydantic import ValidationError
 from datetime import datetime
 import dotenv
@@ -15,6 +17,7 @@ class PromptAgent():
         self.model = model
         self.verbose = verbose
 
+    @traceable(name="PromptAgent.parse")
     async def parse(self, instruction, max_retries=5):
         if self.verbose:
             print(f'{datetime.now()}     parsing user request...')
@@ -45,7 +48,8 @@ class PromptAgent():
                     "Return a corrected response that strictly matches the required schema.\n"
                 )
 
-            interaction = await self.client.aio.interactions.create(
+            interaction = await traced_interactions_create(
+                self.client,
                 model=self.model,
                 input=prompt,
                 generation_config={

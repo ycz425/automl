@@ -5,6 +5,7 @@ from app.graph.graph import graph
 from app.graph.context import AutoMLContext
 from app.services.status_store import StatusStore
 from app.services.file_storage import FileStorage
+from langsmith import traceable
 
 
 class AutoMLService:
@@ -13,6 +14,7 @@ class AutoMLService:
         self.status_store = StatusStore()
         self.file_storage = FileStorage()
 
+    @traceable(name="automl_run", run_type="chain")
     async def start(self, user_input: str, dataset_id: str, thread_id: str):
         config = self._config(thread_id)
         initial_state = AutoMLState(
@@ -21,27 +23,26 @@ class AutoMLService:
             verbose=True
         )
         await self.file_storage.make_run_directory(thread_id)
-        await self.graph.ainvoke(initial_state, config=config, context=self._context())
-        # try:
-        #     await self.graph.ainvoke(initial_state, config=config, context=self._context())
-        # except:
-        #     await self.status_store.update(
-        #         thread_id,
-        #         status='failed',
-        #         message='Failed.'
-            # )
+        try:
+            await self.graph.ainvoke(initial_state, config=config, context=self._context())
+        except:
+            await self.status_store.update(
+                thread_id,
+                status='failed',
+                message='Failed.'
+            )
     
+    @traceable(name="automl_resume", run_type="chain")
     async def resume(self, user_input: str, thread_id: str):
         config = self._config(thread_id)
-        await self.graph.ainvoke(Command(resume=user_input), config=config, context=self._context())
-        # try:
-        #     await self.graph.ainvoke(Command(resume=user_input), config=config, context=self._context())
-        # except:
-        #     await self.status_store.update(
-        #         thread_id,
-        #         status='failed',
-        #         message='Failed.'
-        #     )
+        try:
+            await self.graph.ainvoke(Command(resume=user_input), config=config, context=self._context())
+        except:
+            await self.status_store.update(
+                thread_id,
+                status='failed',
+                message='Failed.'
+            )
 
 
     async def get_status(self, thread_id: str):

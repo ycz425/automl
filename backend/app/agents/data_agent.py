@@ -2,6 +2,8 @@ from google import genai
 import pandas as pd
 from app.graph.schemas.data_info import DatasetProfile, DatasetAnalysis, ColumnProfile, dataset_analysis_output
 from app.graph.schemas.user_request import UserRequest
+from app.services.tracing import traced_interactions_create
+from langsmith import traceable
 from pydantic import ValidationError
 from datetime import datetime
 import dotenv
@@ -109,6 +111,7 @@ class DataAgent():
 
         return retry_problems
 
+    @traceable(name="DataAgent.analyse_profile")
     async def analyse_profile(self, user_request: UserRequest, dataset_profile: DatasetProfile, max_retries=5):
         if self.verbose:
             print(f'{datetime.now()}     analysing dataset profile...')
@@ -140,7 +143,8 @@ class DataAgent():
                     "Correct these problems while continuing to strictly follow the schema."
                 )
 
-            interaction = await self.client.aio.interactions.create(
+            interaction = await traced_interactions_create(
+                self.client,
                 model=self.model,
                 input=prompt,
                 generation_config={

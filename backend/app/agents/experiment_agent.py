@@ -3,6 +3,8 @@ from app.graph.schemas.user_request import UserRequest
 from app.graph.schemas.data_info import DatasetProfile, DatasetAnalysis
 from app.graph.schemas.plan import Plan
 from app.graph.schemas.experiment import ExperimentImplementation, ExperimentResult, Experiment
+from app.services.tracing import traced_interactions_create
+from langsmith import traceable
 from pydantic import ValidationError
 import tempfile
 from pathlib import Path
@@ -24,6 +26,7 @@ class ExperimentAgent():
             self.model = model
             self.verbose = verbose
 
+    @traceable(name="ExperimentAgent.generate_implementation")
     async def generate_implementation(self, data_path, user_request: UserRequest, dataset_profile: DatasetProfile, dataset_analysis: DatasetAnalysis, plan: Plan, output_path: str, max_retries=5):
         if self.verbose:
             print(f'{datetime.now()}     generating experiment implementation...')
@@ -67,7 +70,8 @@ class ExperimentAgent():
                     "Return a corrected response that strictly matches the required schema.\n"
                 )
 
-            interaction = await self.client.aio.interactions.create(
+            interaction = await traced_interactions_create(
+                self.client,
                 model=self.model,
                 input=prompt,
                 generation_config={
@@ -90,6 +94,7 @@ class ExperimentAgent():
                     print(f'{datetime.now()}     ExperimentImplementation model validation failed - retrying... (attempt: {attempt + 1}/{max_retries})')
 
     
+    @traceable(name="ExperimentAgent.repair_implementation")
     async def repair_implementation(self, implementation: ExperimentImplementation, error_message: str, plan: Plan, output_path: str, max_retries=5):
         if self.verbose:
             print(f'{datetime.now()}     repairing experiment implementation...')
@@ -130,7 +135,8 @@ class ExperimentAgent():
                     "Return a corrected response that strictly matches the required schema.\n"
                 )
 
-            interaction = await self.client.aio.interactions.create(
+            interaction = await traced_interactions_create(
+                self.client,
                 model=self.model,
                 input=prompt,
                 generation_config={
@@ -152,6 +158,7 @@ class ExperimentAgent():
                 if self.verbose:
                     print(f'{datetime.now()}     ExperimentImplementation model validation failed - retrying... (attempt: {attempt + 1}/{max_retries})')
     
+    @traceable(name="ExperimentAgent.execute_plan")
     async def execute_plan(self, data_path: str, user_request: UserRequest, dataset_profile: DatasetProfile, dataset_analysis: DatasetAnalysis, plan: Plan, max_retries=5):
         with tempfile.TemporaryDirectory() as temp_dir:
             env_dir = Path(temp_dir) / ".venv"
