@@ -96,9 +96,10 @@ async def get_status(thread_id: str):
 async def stream_status(thread_id: str):
     event, watch = await automl_service.status_store.subscribe(thread_id)
     try:
-        yield (await get_status(thread_id))
+        automl_response = await get_status(thread_id)
+        yield automl_response
 
-        if status["status"] in {
+        if automl_response.status in {
             "completed",
             "failed"
         }:

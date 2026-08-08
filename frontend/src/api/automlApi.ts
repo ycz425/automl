@@ -63,7 +63,7 @@ export async function startAutoML(
 ): Promise<RunAutoMLResponse> {
   const payload: StartAutoMLRequest = { message, dataset_id: datasetId };
   return requestJson<RunAutoMLResponse>(
-    buildUrl("/automl/"),
+    buildUrl("/automl"),
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },

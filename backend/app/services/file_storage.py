@@ -48,12 +48,13 @@ class FileStorage:
 
     async def get_dataset_directory(self, dataset_id: str):
         if dataset_id.startswith('test:'):
-            return (self.test_datasets_directory / str(dataset_id)).resolve()
+            return (self.test_datasets_directory / str(dataset_id.replace('test:', ''))).resolve()
         else:
             return (self.datasets_directory / str(dataset_id)).resolve()
 
     async def get_dataset_path(self, dataset_id: str):
         dataset_directory = await self.get_dataset_directory(dataset_id)
+        print(dataset_directory)
         dataset_path = list(dataset_directory.glob("dataset.*"))[0]
         return dataset_path.resolve()
 
