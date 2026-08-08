@@ -18,11 +18,14 @@ type ArtifactType = Literal[
 
 
 class FileStorage:
-    def __init__(self, root_directory: str = STORAGE_ROOT):
+    def __init__(self, root_directory: str = STORAGE_ROOT, test_directory: str = 'test'):
         self.root_directory = Path(root_directory)
+        self.test_directory = Path(test_directory)
 
         self.datasets_directory = self.root_directory / 'datasets'
         self.datasets_directory.mkdir(parents=True, exist_ok=True)
+
+        self.test_datasets_directory = self.test_directory / 'datasets'
 
         self.runs_directory = self.root_directory / 'runs'
         self.runs_directory.mkdir(parents=True, exist_ok=True)
@@ -44,7 +47,10 @@ class FileStorage:
         return destination
 
     async def get_dataset_directory(self, dataset_id: str):
-        return (self.datasets_directory / str(dataset_id)).resolve()
+        if dataset_id.startswith('test:'):
+            return (self.test_datasets_directory / str(dataset_id)).resolve()
+        else:
+            return (self.datasets_directory / str(dataset_id)).resolve()
 
     async def get_dataset_path(self, dataset_id: str):
         dataset_directory = await self.get_dataset_directory(dataset_id)
