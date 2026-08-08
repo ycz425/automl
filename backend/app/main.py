@@ -52,7 +52,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.post("/automl/", response_model=RunAutoMLResponse, status_code=202)
+@app.post("/automl", response_model=RunAutoMLResponse, status_code=202)
 async def start_automl(request: StartAutoMLRequest, background_tasks: BackgroundTasks):
     thread_id = str(uuid4())
     background_tasks.add_task(
@@ -81,24 +81,35 @@ async def resume_automl(thread_id: str, request: ResumeAutoMLRequest, background
     return RunAutoMLResponse(thread_id=thread_id)
 
 
-@app.get("/automl/{thread_id}/stream", response_class=EventSourceResponse)
-async def stream_status(thread_id: str):
+@app.get("/automl/{thread_id}/status", response_model=AutoMLResponse)
+async def get_status(thread_id: str):
     status = await automl_service.get_status(thread_id)
     if status is None:
         raise HTTPException(
             status_code=404,
             detail="AutoML thread not found"
         )
+    return AutoMLResponse(status=status['status'], node=status['node'], message=status['message'])
 
+
+@app.get("/automl/{thread_id}/stream", response_class=EventSourceResponse)
+async def stream_status(thread_id: str):
     event, watch = await automl_service.status_store.subscribe(thread_id)
     try:
+        yield (await get_status(thread_id))
+
+        if status["status"] in {
+            "completed",
+            "failed"
+        }:
+            return
+
         while True:
             await event.wait()
             event.clear()
             status = await automl_service.get_status(thread_id)
             if status is None:
                 return
-            status = await automl_service.get_status(thread_id)
             yield AutoMLResponse(status=status['status'], node=status['node'], message=status['message'])
 
             if status["status"] in {
