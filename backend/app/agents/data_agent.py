@@ -1,11 +1,13 @@
 from google import genai
 import pandas as pd
-from app.graph.schemas.data_info import DatasetProfile, DatasetAnalysis, ColumnProfile, dataset_analysis_output
+from app.graph.schemas.data_info import DatasetProfile, DatasetAnalysis, ColumnProfile, dataset_analysis_output, DataSplits
 from app.graph.schemas.user_request import UserRequest
 from app.services.tracing import traced_interactions_create
 from langsmith import traceable
 from pydantic import ValidationError
 from datetime import datetime
+from sklearn.model_selection import StratifiedGroupKFold, LeaveOneGroupOut, GroupShuffleSplit, GroupKFold
+import numpy as np
 import dotenv
 import os
 
@@ -18,6 +20,51 @@ class DataAgent():
         self.client = genai.Client(api_key=GEMINI_API_KEY)
         self.model = model
         self.verbose = verbose
+
+    def create_split_index(self, df: pd.DataFrame, user_request: UserRequest, dataset_analysis: DatasetAnalysis):
+        X = df.drop(columns=dataset_analysis.target_column)
+        y = df[dataset_analysis.target_column]
+        groups = df[dataset_analysis.group_column] if dataset_analysis.group_column else np.arange(len(df))
+
+        data_splits = {
+            'splits': []
+        }
+
+        if user_request.evaluation_method == 'train_validation_split':
+            if user_request.stratify:
+                splits = StratifiedGroupKFold(
+                    n_splits=round(1 / user_request.validation_size)
+                )
+            else:
+                splits = GroupShuffleSplit(
+                    n_splits=1,
+                    test_size=user_request.validation_size,
+                    random_state=42
+                )
+            train_idx, val_idx = next(splits.split(X, y, groups=groups))
+            data_splits['splits'].append({'train_idx': train_idx, 'val_idx': val_idx})
+
+        elif user_request.evaluation_method == 'k_fold_cross_validation':
+            if user_request.stratify:
+                splits = StratifiedGroupKFold(
+                    n_splits=user_request.num_folds,
+                )
+            else:
+                splits = GroupKFold(
+                    n_splits=user_request.num_folds,
+                )
+            for train_idx, val_idx in splits.split(X, y, groups=groups):
+                data_splits['splits'].append({'train_idx': train_idx, 'val_idx': val_idx})
+
+        elif user_request.evaluation_method == 'leave_one_group_out':
+            splits = LeaveOneGroupOut()
+            for train_idx, val_idx in splits.split(X, y, groups=groups):
+                data_splits['splits'].append({'train_idx': train_idx, 'val_idx': val_idx})
+
+        else:
+            raise RuntimeError
+
+        return DataSplits.model_validate(data_splits)
 
     def identify_feature_type(self, df: pd.DataFrame, column: str):
         col_data = df[column]
@@ -70,6 +117,7 @@ class DataAgent():
                     category_counts=category_counts,
                     mean=mean,
                     std=std,
+                    num_unique=df[column].nunique(),
                     num_missing=df[column].isna().sum(),
                     missing_rate = df[column].isna().sum() / len(df) if len(df) > 0 else None
                 )

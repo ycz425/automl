@@ -253,8 +253,6 @@ class OutputAgent():
         for attempt in range(max_retries + 1):
             if self.verbose:
                 print(f'{datetime.now()}     generating output...')
-            shutil.rmtree(output_dir)
-            os.makedirs(output_dir, exist_ok=True)
             try:
                 with open(train_path, 'w') as f:
                     f.write(output_scripts.train_script)

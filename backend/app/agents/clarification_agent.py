@@ -6,6 +6,7 @@ from pydantic import ValidationError, BaseModel
 from app.graph.schemas.llm_output import LLMOutput
 from datetime import datetime
 import dotenv
+import json
 import os
 
 dotenv.load_dotenv()
@@ -36,10 +37,13 @@ class ClarificationAgent():
 
             Requirements:
             - Update only the field(s) identified by clarification_request.fields.
-            - Preserve all unrelated UserRequest fields exactly.
+            - Preserve all unrelated fields exactly.
             - Interpret the user's clarification in the context of the clarification question and reason.
             - Do not invent information not provided by the user.
             - If the clarification is insufficient, leave the field unresolved and request a more specific clarification.
+            - Request further clarification if any other clarifiable fields remain undetermined.
+            - Judge if a field is undetermined based on existing value and field description in the following JSON schema:
+            {json.dumps(data.model_json_schema(), indent=2)}
             - Return only complete output matching the required schema.
             """
             if validation_error:

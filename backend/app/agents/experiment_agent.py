@@ -1,6 +1,6 @@
 from google import genai
 from app.graph.schemas.user_request import UserRequest
-from app.graph.schemas.data_info import DatasetProfile, DatasetAnalysis
+from app.graph.schemas.data_info import DatasetProfile, DatasetAnalysis, DataSplits
 from app.graph.schemas.plan import Plan
 from app.graph.schemas.experiment import ExperimentImplementation, ExperimentResult, Experiment
 from app.services.tracing import traced_interactions_create
@@ -27,7 +27,7 @@ class ExperimentAgent():
             self.verbose = verbose
 
     @traceable(name="ExperimentAgent.generate_implementation")
-    async def generate_implementation(self, data_path, user_request: UserRequest, dataset_profile: DatasetProfile, dataset_analysis: DatasetAnalysis, plan: Plan, output_path: str, max_retries=5):
+    async def generate_implementation(self, data_path: str, split_path: str, user_request: UserRequest, dataset_profile: DatasetProfile, dataset_analysis: DatasetAnalysis, plan: Plan, output_path: str, max_retries=5):
         if self.verbose:
             print(f'{datetime.now()}     generating experiment implementation...')
 
@@ -42,6 +42,10 @@ class ExperimentAgent():
             - Do not invent column names.
             - Handle missing values and feature types described in the dataset profile.
             - Read the dataset from: {data_path}
+            - Read the split indices from {split_path}
+            - Expect split indices to follow this JSON schema:
+            {json.dumps(DataSplits.model_json_schema(), indent=2)}
+            - Do not generate a new dataset split and only use the given split indices.
             - Save the final experiment result to:
                 {output_path}
             - Make experiment_result.json conform exactly to this JSON schema:
@@ -159,13 +163,13 @@ class ExperimentAgent():
                     print(f'{datetime.now()}     ExperimentImplementation model validation failed - retrying... (attempt: {attempt + 1}/{max_retries})')
     
     @traceable(name="ExperimentAgent.execute_plan")
-    async def execute_plan(self, data_path: str, user_request: UserRequest, dataset_profile: DatasetProfile, dataset_analysis: DatasetAnalysis, plan: Plan, max_retries=5):
+    async def execute_plan(self, data_path: str, split_path: str, user_request: UserRequest, dataset_profile: DatasetProfile, dataset_analysis: DatasetAnalysis, plan: Plan, max_retries=5):
         with tempfile.TemporaryDirectory() as temp_dir:
             env_dir = Path(temp_dir) / ".venv"
             code_path = Path(temp_dir) / "code.py"
             output_path = Path(temp_dir) / "experiment_result.json"
 
-            implementation = await self.generate_implementation(data_path, user_request, dataset_profile, dataset_analysis, plan, output_path)
+            implementation = await self.generate_implementation(data_path, split_path, user_request, dataset_profile, dataset_analysis, plan, output_path)
 
             for attempt in range(max_retries + 1):
                 if self.verbose:

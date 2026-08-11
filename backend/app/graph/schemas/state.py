@@ -16,6 +16,8 @@ class AutoMLState(BaseModel):
     dataset_profile: DatasetProfile | None = None
     dataset_analysis: DatasetAnalysis | None = None
 
+    split_path: str | None = None
+
     plan: Plan | None = None
 
     experiments: list[Experiment] = []

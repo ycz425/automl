@@ -15,6 +15,7 @@ async def experiment_agent_node(state: AutoMLState, runtime: Runtime[AutoMLConte
     experiment_agent = ExperimentAgent(verbose=state.verbose)
     experiment = await experiment_agent.execute_plan(
         str(await runtime.context.file_storage.get_dataset_path(state.dataset_id)),
+        str(state.split_path),
         state.user_request,
         state.dataset_profile,
         state.dataset_analysis,
@@ -22,7 +23,6 @@ async def experiment_agent_node(state: AutoMLState, runtime: Runtime[AutoMLConte
     )
 
     return {
-        'stage': 'plan' if state.max_replans > 1 else 'output',
         'experiments': state.experiments + [experiment],
         'max_replans': state.max_replans - 1
     }

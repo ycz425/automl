@@ -23,19 +23,20 @@ class AutoMLService:
             verbose=True
         )
         await self.file_storage.make_run_directory(thread_id)
-        await self.graph.ainvoke(initial_state, config=config, context=self._context())
-        # try:
-        #     await self.graph.ainvoke(initial_state, config=config, context=self._context())
-        # except:
-        #     await self.status_store.update(
-        #         thread_id,
-        #         status='failed',
-        #         message='Failed.'
-        #     )
+        # await self.graph.ainvoke(initial_state, config=config, context=self._context())
+        try:
+            await self.graph.ainvoke(initial_state, config=config, context=self._context())
+        except:
+            await self.status_store.update(
+                thread_id,
+                status='failed',
+                message='Failed.'
+            )
     
     @traceable(name="automl_resume", run_type="chain")
     async def resume(self, user_input: str, thread_id: str):
         config = self._config(thread_id)
+        # await self.graph.ainvoke(Command(resume=user_input), config=config, context=self._context())
         try:
             await self.graph.ainvoke(Command(resume=user_input), config=config, context=self._context())
         except:

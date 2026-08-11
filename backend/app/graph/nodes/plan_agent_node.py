@@ -18,6 +18,5 @@ async def plan_agent_node(state: AutoMLState):
     plan = await plan_agent.plan(state.user_request, state.dataset_profile, state.dataset_analysis, state.experiments)
 
     return {
-        'stage': 'experiment',
         'plan': plan
     }

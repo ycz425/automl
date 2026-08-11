@@ -2,16 +2,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-type SplitMethod = Literal[
-    "train_validation_test",
-    "k_fold_cross_validation",
-    "stratified_k_fold",
-    "group_k_fold",
-    "time_series_split",
-    "leave_one_group_out",
-]
-
-
 class HyperparameterEntry(BaseModel):
     name: str = Field(description="Name of the architecture-specific hyperparameter.")
     value: Any = Field(description="Proposed value of the architecture-specific hyperparameter.")
@@ -36,21 +26,10 @@ class TrainingStrategy(BaseModel):
     additional_hyperparameters: list[HyperparameterEntry] = Field(default_factory=list, description="Additional training hyperparameters not represented by the explicit fields above.")
 
 
-class SplitStrategy(BaseModel):
-    method: SplitMethod = Field(description="Method used to divide the data for training and evaluation.")
-    test_size: float | None = Field(default=None, gt=0, lt=1, description="Proportion of observations assigned to the test set. Use null when the selected splitting method does not use a fixed test set.")
-    validation_size: float | None = Field(default=None, gt=0, lt=1, description="Proportion of observations assigned to the validation set. Use null when validation is performed through cross-validation.")
-    num_folds: int | None = Field(default=None, ge=2, description="Number of cross-validation folds. Use null for methods that do not use cross-validation.")
-    stratify: bool = Field(default=False, description="Whether class proportions should be preserved across splits.")
-    group_column: str | None = Field(default=None, description="Column defining groups that must remain entirely within one split, such as subject, patient, or recording ID.")
-    random_seed: int = Field(default=42, description="Random seed used to make data splitting reproducible.")
-
-
 class Plan(BaseModel):
     preprocessing_steps: list[str] = Field(default_factory=list, description="Ordered preprocessing operations to apply before model training, such as imputation, scaling, encoding, resampling, augmentation, or feature extraction.")
     architecture_plan: ArchitecturePlan = Field(description="Proposed model architecture and its structural settings.")
     training_strategy: TrainingStrategy = Field(description="Proposed optimization, regularization, batching, and stopping strategy.")
-    split_strategy: SplitStrategy = Field(description="Data-splitting and cross-validation strategy.")
     rationale: str = Field(description="Explanation of why this plan is appropriate for the user request and the observed dataset properties.")
     assumptions: list[str] = Field(default_factory=list, description="Assumptions made because required information was unavailable or ambiguous.")
     dependencies: list[str] = Field(default_factory=list, description="Python packages or external libraries required to implement the plan.")
