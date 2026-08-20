@@ -1,11 +1,9 @@
 from app.graph.schemas.state import AutoMLState
 from app.agents.data_agent import DataAgent
-from app.graph.schemas.clarification_request import ClarificationRequest
 import pandas as pd
 from datetime import datetime
 from langgraph.runtime import Runtime
 from app.graph.context import AutoMLContext
-import json
 
 
 async def data_status_update_node(state: AutoMLState, runtime: Runtime[AutoMLContext]):
@@ -22,21 +20,14 @@ async def data_agent_node(state: AutoMLState, runtime: Runtime[AutoMLContext]):
     df = pd.read_csv(await runtime.context.file_storage.get_dataset_path(state.dataset_id))
 
     dataset_profile = data_agent.profile_dataset(df)
-    dataset_analysis_output = await data_agent.analyse_profile(state.user_request, dataset_profile)
+    dataset_analysis= await data_agent.analyse_profile(state.user_request, dataset_profile)
 
-    if dataset_analysis_output.clarification_request:
-        clarification_request = ClarificationRequest(source='dataset_analysis', request=dataset_analysis_output.clarification_request)
-        split_path = None
-    else:
-        clarification_request = None
-        splits = data_agent.create_split_index(df, state.user_request, dataset_analysis_output.data)
-        split_path = str((await runtime.context.file_storage.get_run_directory(runtime.execution_info.thread_id)) / 'splits.json')
-        with open(split_path, 'w') as f:
-            json.dump(splits.model_dump(), f, indent=4)
+
+    problems = dataset_analysis.problems(state.user_request)
 
     return {
         'dataset_profile': dataset_profile,
-        'dataset_analysis': dataset_analysis_output.data,
-        'split_path': split_path,
-        'clarification_request': clarification_request
+        'dataset_analysis': dataset_analysis,
+        'problems': problems,
+        'pending_clarification': 'dataset_analysis' if problems else None
     }

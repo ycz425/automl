@@ -4,7 +4,7 @@ from app.graph.context import AutoMLContext
 
 
 async def clarification_router(state: AutoMLState, runtime: Runtime[AutoMLContext]):
-    if state.clarification_request:
+    if state.problems and state.pending_clarification:
         if state.clarification_retries == 0:
             return 'block'
         else:

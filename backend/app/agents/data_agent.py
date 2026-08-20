@@ -1,6 +1,6 @@
 from google import genai
 import pandas as pd
-from app.graph.schemas.data_info import DatasetProfile, DatasetAnalysis, ColumnProfile, dataset_analysis_output, DataSplits
+from app.graph.schemas.data_info import DatasetProfile, DatasetAnalysis, ColumnProfile, DataSplits
 from app.graph.schemas.user_request import UserRequest
 from app.services.tracing import traced_interactions_create
 from langsmith import traceable
@@ -201,12 +201,12 @@ class DataAgent():
                 },
                 response_format={
                     'mime_type': 'application/json',
-                    'schema': dataset_analysis_output.model_json_schema()
+                    'schema': DatasetAnalysis.model_json_schema()
                 }
             )
 
             try:
-                llm_output = dataset_analysis_output.model_validate_json(interaction.output_text)
+                dataset_analysis = DatasetAnalysis.model_validate_json(interaction.output_text)
             except ValidationError as e:
                 if attempt == max_retries:
                     raise
@@ -216,10 +216,10 @@ class DataAgent():
                 continue
             validation_error = None
 
-            retry_problems = self.retry_problems(dataset_profile, llm_output.data)
+            retry_problems = self.retry_problems(dataset_profile, dataset_analysis)
 
             if not retry_problems:
-                return llm_output
+                return dataset_analysis
             
             if attempt == max_retries:
                 raise RuntimeError('DataAgent failed semantic validation')
