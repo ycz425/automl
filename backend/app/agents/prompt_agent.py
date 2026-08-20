@@ -1,5 +1,5 @@
 from google import genai
-from app.graph.schemas.user_request import prompt_parse_output
+from app.graph.schemas.user_request import UserRequest
 from app.services.tracing import traced_interactions_create
 from langsmith import traceable
 from pydantic import ValidationError
@@ -37,7 +37,6 @@ class PromptAgent():
             - Extract only information explicitly stated by the user.
             - Do not infer dataset columns or invent missing details.
             - Leave fields null if they are unknown.
-            - If required information is missing to complete the request, return clarification questions.
             - Keep assumptions to an absolute minimum.
             - Produce only valid JSON matching the provided schema.
             """
@@ -58,15 +57,17 @@ class PromptAgent():
                 },
                 response_format={
                     'mime_type': 'application/json',
-                    'schema': prompt_parse_output.model_json_schema()
+                    'schema': UserRequest.model_json_schema()
                 }
             )
             try:
-                return prompt_parse_output.model_validate_json(interaction.output_text)
+                return UserRequest.model_validate_json(interaction.output_text)
             except ValidationError as e:
                 if attempt == max_retries:
                     raise
                 validation_error = str(e)
                 if self.verbose:
                     print(f'{datetime.now()}     model validation failed - retrying... (attempt: {attempt + 1}/{max_retries})')
+
+
     

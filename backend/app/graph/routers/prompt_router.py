@@ -2,11 +2,10 @@ from app.graph.schemas.state import AutoMLState
 from datetime import datetime
 
 def prompt_router(state: AutoMLState):
-    if state.clarification_request:
+    if state.problems and state.pending_clarification:
         if state.clarification_retries == 0:
             return 'block'
         else:
-            print(f"{datetime.now()}     requesting clarification...")
             return 'request_clarification'
     else:
         return 'continue'

@@ -7,7 +7,8 @@ from app.graph.nodes.data_agent_node import data_agent_node, data_status_update_
 from app.graph.nodes.plan_agent_node import plan_agent_node, plan_status_update_node
 from app.graph.nodes.experiment_agent_node import experiment_agent_node, experiment_status_update_node
 from app.graph.nodes.output_agent_node import output_agent_node, output_status_update_node
-from app.graph.nodes.clarification_agent_node import clarification_agent_node, clarification_status_update_node
+from app.graph.nodes.clarification_node import apply_clarification_node, clarification_status_update_node, request_clarification_node
+from app.graph.nodes.data_splitting_node import data_splitting_node
 from app.graph.nodes.success_node import success_node
 from app.graph.nodes.failure_node import failure_node
 
@@ -44,8 +45,10 @@ def build_graph():
     builder.add_node('data_status_update', data_status_update_node)
     builder.add_edge('data_status_update', 'data_agent')
 
+    builder.add_node('data_splitting', data_splitting_node)
     builder.add_node('plan_agent', plan_agent_node)
     builder.add_node('plan_status_update', plan_status_update_node)
+    builder.add_edge('data_splitting', 'plan_status_update')
     builder.add_edge('plan_status_update', 'plan_agent')
 
     builder.add_node('experiment_agent', experiment_agent_node)
@@ -58,9 +61,11 @@ def build_graph():
     builder.add_node('output_status_update', output_status_update_node)
     builder.add_edge('output_status_update', 'output_agent')
     
-    builder.add_node('clarification_agent', clarification_agent_node)
+    builder.add_node('apply_clarification', apply_clarification_node)
     builder.add_node('clarification_status_update', clarification_status_update_node)
-    builder.add_edge('clarification_status_update', 'clarification_agent')
+    builder.add_node('request_clarification', request_clarification_node)
+    builder.add_edge('request_clarification', 'clarification_status_update')
+    builder.add_edge('clarification_status_update', 'apply_clarification')
 
     builder.add_node('success', success_node)
     builder.add_edge('output_agent', 'success')
@@ -75,7 +80,7 @@ def build_graph():
         prompt_router,
         {
             'continue': 'data_status_update',
-            'request_clarification': 'clarification_status_update',
+            'request_clarification': 'request_clarification',
             'block': 'failure'
         }
     )
@@ -85,19 +90,19 @@ def build_graph():
         'data_agent',
         data_router,
         {
-            'continue': 'plan_status_update',
-            'request_clarification': 'clarification_status_update',
+            'continue': 'data_splitting',
+            'request_clarification': 'request_clarification',
             'block': 'failure'
         }
     )
 
     builder.add_conditional_edges(
-        'clarification_agent',
+        'apply_clarification',
         clarification_router,
         {
-            'continue_plan': 'plan_status_update',
+            'continue_plan': 'data_splitting',
             'continue_data': 'data_status_update',
-            'request_clarification': 'clarification_status_update',
+            'request_clarification': 'request_clarification',
             'block': 'failure'
         }
     )

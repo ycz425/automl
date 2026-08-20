@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Any, Literal
-from app.graph.schemas.llm_output import LLMOutput
+from app.graph.schemas.clarifiable_model import ClarifiableModel
+from app.graph.schemas.user_request import UserRequest
 
 type ClarifiableField = Literal[
     'target_column',
@@ -34,11 +35,21 @@ class DatasetProfile(BaseModel):
     columns: list[ColumnProfile] = Field(default_factory=list)
 
 
-class DatasetAnalysis(BaseModel):
-    target_column: str | None = Field(default=None, description="Column that most likely represents the prediction target. Use null when it cannot be confidently determined from the column name and request clarification.")
+class DatasetAnalysis(ClarifiableModel):
+    target_column: str | None = Field(default=None, description="Column that most likely represents the prediction target. Use null when it cannot be confidently determined from the column name.")
     feature_columns: list[str] = Field(default_factory=list, description="Columns considered eligible as model inputs after applying the user's inclusion and exclusion requirements.")
     excluded_columns: list[str] = Field(default_factory=list, description="Columns that should not be used as model inputs, such as identifiers, leakage variables, or user-excluded columns.")
-    group_column: str | None = Field(default=None, description="Column defining groups that must remain entirely within one split, such as subject, patient, or recording ID. If the user does not specify a column, return null and request clarification if there are any candidate group column.")
+    group_column: str | None = Field(default=None, description="Column defining groups that must remain entirely within one split, such as subject, patient, or recording ID. Return null if user request does not specify any group or it cannot be confidently determined from the column name.")
+
+    def problems(self, user_request: UserRequest):
+        problems = []
+        if self.target_column is None:
+            problems.append("target_column cannot be determined based on dataset column names.")
+
+        if user_request.group_description is not None and self.group_column is None:
+            problems.append("group_column cannot be determined based on dataset column names")
+        return problems
+            
 
 
 class Split(BaseModel):
@@ -47,6 +58,3 @@ class Split(BaseModel):
 
 class DataSplits(BaseModel):
     splits: list[Split] = Field(default_factory=list, description="Cross-validation folds. Contains only one fold if evaluation_method is train_validation_split")
-
-
-dataset_analysis_output = LLMOutput[DatasetAnalysis, ClarifiableField]
