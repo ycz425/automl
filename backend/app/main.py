@@ -1,8 +1,12 @@
 from fastapi import FastAPI, BackgroundTasks, HTTPException, File, UploadFile
-from fastapi.responses import FileResponse, EventSourceResponse
+from fastapi.responses import FileResponse, EventSourceResponse, Response
 from pydantic import BaseModel
 from app.services.automl_service import automl_service
 from app.services.status_store import automl_node, automl_status
+import subprocess
+import tempfile
+import asyncio
+import sys
 from typing import Annotated
 from uuid import uuid4, UUID
 import mimetypes
@@ -138,6 +142,75 @@ async def download_artifact(thread_id: str, filename: str):
         path=os.path.join(await automl_service.file_storage.get_run_directory(thread_id), filename),
         filename=filename,
         media_type=media_type or "application/octet-stream"
+    )
+
+@app.post("/predict/{thread_id}")
+async def predict(thread_id: str, file: Annotated[UploadFile, File()]):
+    run_dir = await automl_service.file_storage.get_run_directory(thread_id)
+    model_path = str(run_dir / 'model.joblib')
+    predict_path = str(run_dir / 'predict.py')
+    requirements_path = str(run_dir / 'requirements.txt')
+
+    if not os.path.exists(model_path) or not os.path.exists(predict_path) or not os.path.exists(requirements_path):
+        raise HTTPException(
+            status_code=404,
+            detail="Required artifacts not found"
+        )
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        input_path = os.path.join(temp_dir, 'input.csv')
+        env_dir = os.path.join(temp_dir, '.venv')
+        output_path = os.path.join(temp_dir, 'output.csv')
+
+        with open(input_path, 'wb') as f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+
+        if os.name == "nt":
+            env_python = os.path.join(env_dir, "Scripts", "python.exe")
+        else:
+            env_python = os.path.join(env_dir, "bin", "python")
+
+        try:
+            await asyncio.to_thread(
+                subprocess.run,
+                [sys.executable, '-m', 'venv', '--clear', env_dir],
+                check=True,
+                capture_output=True,
+                text=True
+            )
+
+            await asyncio.to_thread(
+                subprocess.run,
+                [env_python, "-m", "pip", "install", "-r", requirements_path],
+                check=True,
+                capture_output=True,
+                text=True
+            )
+
+            await asyncio.to_thread(
+                subprocess.run,
+                [env_python, predict_path, '--model', model_path, '--input', input_path, '--output', output_path],
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            
+        except subprocess.CalledProcessError as e:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Prediction failed: {e.stderr or e.stdout or str(e)}"
+            )
+
+        with open(output_path, 'rb') as f:
+            content = f.read()
+
+    return Response(
+        content=content,
+        media_type='text/csv'
     )
 
 

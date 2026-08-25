@@ -1,10 +1,11 @@
-import { AlertTriangle, Bot, HelpCircle, Loader2 } from "lucide-react";
+import { ChevronDown, FileOutput, Loader2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { NODE_LABELS } from "../types/automl";
 import type { ChatMessage } from "../types/chat";
 import { ArtifactCard } from "./ArtifactCard";
 import { AttachmentChip } from "./AttachmentChip";
+import { CsvMessageBubble } from "./CsvMessageBubble";
 import { PipelineProgress } from "./PipelineProgress";
 
 type ChatMessageBubbleProps = {
@@ -27,6 +28,31 @@ export function ChatMessageBubble({ message, getDownloadUrl }: ChatMessageBubble
     minute: "2-digit",
   });
 
+  if (message.kind === "csv" && message.attachment) {
+    return (
+      <div
+        className={[
+          "flex animate-fade-in flex-col gap-1.5",
+          isUser ? "items-end" : "items-start",
+        ].join(" ")}
+      >
+        <div className="w-full max-w-[85%] sm:max-w-[75%]">
+          <CsvMessageBubble
+            name={message.attachment.name}
+            size={message.attachment.size}
+            file={message.attachment.file}
+            csvText={message.attachment.csvText}
+            caption={message.attachment.caption}
+            isUser={isUser}
+          />
+        </div>
+        <span className={isUser ? "pr-1 text-[11px] text-neutral-600" : "pl-1 text-[11px] text-neutral-600"}>
+          {time}
+        </span>
+      </div>
+    );
+  }
+
   if (isUser) {
     return (
       <div className="flex animate-fade-in flex-col items-end gap-1.5">
@@ -45,31 +71,10 @@ export function ChatMessageBubble({ message, getDownloadUrl }: ChatMessageBubble
 
   const isError = message.kind === "error";
   const isProgress = message.kind === "progress";
-  const isClarification = message.kind === "clarification";
 
   return (
-    <div className="flex animate-fade-in items-start gap-3">
-      <div
-        className={[
-          "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-          isError
-            ? "bg-red-500/10 text-red-400"
-            : isClarification
-            ? "bg-amber-500/10 text-amber-400"
-            : "bg-indigo-500/10 text-indigo-400",
-        ].join(" ")}
-        aria-hidden="true"
-      >
-        {isError ? (
-          <AlertTriangle className="h-4 w-4" />
-        ) : isClarification ? (
-          <HelpCircle className="h-4 w-4" />
-        ) : (
-          <Bot className="h-4 w-4" />
-        )}
-      </div>
-
-      <div className="min-w-0 max-w-[90%] flex-1 sm:max-w-[80%]">
+    <div className="flex animate-fade-in flex-col items-start gap-1.5">
+      <div className="max-w-[90%] sm:max-w-[80%]">
         <div
           className={[
             "rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm",
@@ -87,26 +92,38 @@ export function ChatMessageBubble({ message, getDownloadUrl }: ChatMessageBubble
               {message.content && (
                 <p className="text-sm leading-relaxed text-neutral-400">{message.content}</p>
               )}
-              <PipelineProgress currentNode={message.node} iteration={message.iteration} />
+              {message.node && (
+                <PipelineProgress currentNode={message.node} iteration={message.iteration} />
+              )}
             </div>
           ) : (
             <Markdown content={message.content} />
           )}
 
           {message.kind === "result" && message.artifacts && message.artifacts.length > 0 && (
-            <div className="mt-4 flex flex-col gap-2">
-              {message.artifacts.map((artifact) => (
-                <ArtifactCard
-                  key={artifact.filename}
-                  artifact={artifact}
-                  downloadUrl={getDownloadUrl(artifact.filename)}
+            <details className="group mt-4 rounded-lg border border-neutral-800">
+              <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-medium text-neutral-400 transition-colors hover:text-neutral-200">
+                <FileOutput className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                Downloadable files ({message.artifacts.length})
+                <ChevronDown
+                  className="ml-auto h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-180"
+                  aria-hidden="true"
                 />
-              ))}
-            </div>
+              </summary>
+              <div className="flex flex-col gap-2 px-3 pb-3">
+                {message.artifacts.map((artifact) => (
+                  <ArtifactCard
+                    key={artifact.filename}
+                    artifact={artifact}
+                    downloadUrl={getDownloadUrl(artifact.filename)}
+                  />
+                ))}
+              </div>
+            </details>
           )}
         </div>
-        <span className="ml-1 mt-1 inline-block text-[11px] text-neutral-600">{time}</span>
       </div>
+      <span className="pl-1 text-[11px] text-neutral-600">{time}</span>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { RotateCcw } from "lucide-react";
 import { ChatComposer } from "./components/ChatComposer";
 import { ChatHeader } from "./components/ChatHeader";
 import { ChatMessageList } from "./components/ChatMessageList";
+import { PredictBar } from "./components/PredictBar";
 import { useAutoMLChat } from "./hooks/useAutoMLChat";
 
 export default function App() {
@@ -11,22 +12,25 @@ export default function App() {
     selectedFile,
     errorMessage,
     isSubmitting,
+    isPredicting,
     isComposerEnabled,
     canAttachFile,
+    isPredictMode,
     isAwaitingClarification,
     showStartNewAnalysis,
     selectFile,
     sendMessage,
+    runPrediction,
     resetSession,
     getDownloadUrl,
     setErrorMessage,
   } = useAutoMLChat();
 
   return (
-    <div className="flex h-dvh flex-col bg-neutral-950 text-neutral-100">
+    <div className="flex h-dvh flex-col overflow-hidden bg-neutral-950 text-neutral-100">
       <ChatHeader runState={runState} onClearSession={resetSession} />
 
-      <main className="flex flex-1 flex-col overflow-y-auto">
+      <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col">
           <ChatMessageList messages={messages} getDownloadUrl={getDownloadUrl} />
 
@@ -44,9 +48,9 @@ export default function App() {
               <button
                 type="button"
                 onClick={resetSession}
-                className="flex items-center gap-2 rounded-full bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-400"
+                className="flex items-center gap-1.5 text-xs font-medium text-neutral-500 transition-colors hover:text-neutral-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-400"
               >
-                <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
                 Start new analysis
               </button>
             </div>
@@ -54,17 +58,25 @@ export default function App() {
         </div>
       </main>
 
-      {!showStartNewAnalysis && (
-        <ChatComposer
-          isEnabled={isComposerEnabled}
-          isSubmitting={isSubmitting}
-          canAttachFile={canAttachFile}
-          isAwaitingClarification={isAwaitingClarification}
-          selectedFile={selectedFile}
-          onSelectFile={selectFile}
-          onSend={sendMessage}
+      {isPredictMode ? (
+        <PredictBar
+          isPredicting={isPredicting}
+          onPredict={runPrediction}
           onInvalidFile={setErrorMessage}
         />
+      ) : (
+        runState !== "failed" && (
+          <ChatComposer
+            isEnabled={isComposerEnabled}
+            isSubmitting={isSubmitting}
+            canAttachFile={canAttachFile}
+            isAwaitingClarification={isAwaitingClarification}
+            selectedFile={selectedFile}
+            onSelectFile={selectFile}
+            onSend={sendMessage}
+            onInvalidFile={setErrorMessage}
+          />
+        )
       )}
     </div>
   );

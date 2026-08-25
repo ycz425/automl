@@ -15,7 +15,8 @@ async def output_agent_node(state: AutoMLState, runtime: Runtime[AutoMLContext])
         print(f'{datetime.now()} [OUTPUT AGENT]')
     output_agent = OutputAgent(verbose=state.verbose)
     await output_agent.generate_output(
-        state.user_request,
+        state.user_request.primary_metric,
+        state.dataset_analysis,
         state.experiments,
         str(await runtime.context.file_storage.get_dataset_path(state.dataset_id)),
         output_dir=str(await runtime.context.file_storage.get_run_directory(runtime.execution_info.thread_id))

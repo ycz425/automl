@@ -5,6 +5,7 @@ import {
   deleteStatus,
   getArtifactDownloadUrl,
   getArtifacts,
+  predict,
   resumeAutoML,
   startAutoML,
   uploadDataset,
@@ -91,6 +92,7 @@ export function useAutoMLChat() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPredicting, setIsPredicting] = useState(false);
 
   const { connect, close } = useAutoMLStream();
   const progressMessageIdRef = useRef<string | null>(null);
@@ -275,10 +277,17 @@ export function useAutoMLChat() {
       addMessage({
         id: generateId(),
         role: "user",
+        kind: "csv",
+        createdAt: new Date().toISOString(),
+        content: "",
+        attachment: { name: file.name, size: file.size, file, caption: "Uploaded dataset" },
+      });
+      addMessage({
+        id: generateId(),
+        role: "user",
         kind: "text",
         createdAt: new Date().toISOString(),
         content: message,
-        attachment: { name: file.name, size: file.size },
       });
 
       setSelectedFile(null);
@@ -395,6 +404,63 @@ export function useAutoMLChat() {
       }
     },
     [isSubmitting, threadId, addMessage]
+  );
+
+  const runPrediction = useCallback(
+    async (file: File) => {
+      if (isPredicting || !threadId) return;
+
+      addMessage({
+        id: generateId(),
+        role: "user",
+        kind: "csv",
+        createdAt: new Date().toISOString(),
+        content: "",
+        attachment: { name: file.name, size: file.size, file, caption: "Prediction input" },
+      });
+
+      const progressId = generateId();
+      addMessage({
+        id: progressId,
+        role: "assistant",
+        kind: "progress",
+        createdAt: new Date().toISOString(),
+        content: "Generating predictions — this may take a moment, especially on the first run.",
+      });
+
+      setSelectedFile(null);
+      setIsPredicting(true);
+
+      try {
+        const csvText = await predict(threadId, file);
+        const outputName = file.name.replace(/\.csv$/i, "") + "_predictions.csv";
+        removeMessage(progressId);
+        addMessage({
+          id: generateId(),
+          role: "assistant",
+          kind: "csv",
+          createdAt: new Date().toISOString(),
+          content: "",
+          attachment: { name: outputName, csvText, caption: "Predictions" },
+        });
+      } catch (error) {
+        removeMessage(progressId);
+        const friendly = toFriendlyMessage(
+          error,
+          "Something went wrong while generating predictions."
+        );
+        addMessage({
+          id: generateId(),
+          role: "assistant",
+          kind: "error",
+          createdAt: new Date().toISOString(),
+          content: friendly,
+        });
+      } finally {
+        setIsPredicting(false);
+      }
+    },
+    [isPredicting, threadId, addMessage, removeMessage]
   );
 
   const sendMessage = useCallback(
@@ -542,6 +608,7 @@ export function useAutoMLChat() {
     (runState === "idle" || runState === "awaiting_clarification") &&
     !isSubmitting;
   const canAttachFile = runState === "idle";
+  const isPredictMode = runState === "completed";
   const isAwaitingClarification = runState === "awaiting_clarification";
   const showStartNewAnalysis = runState === "completed" || runState === "failed";
   const isBusy =
@@ -557,13 +624,16 @@ export function useAutoMLChat() {
     selectedFile,
     errorMessage,
     isSubmitting,
+    isPredicting,
     isComposerEnabled,
     canAttachFile,
+    isPredictMode,
     isAwaitingClarification,
     showStartNewAnalysis,
     isBusy,
     selectFile,
     sendMessage,
+    runPrediction,
     resetSession,
     getDownloadUrl,
     setErrorMessage,

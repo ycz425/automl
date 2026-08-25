@@ -96,6 +96,39 @@ export function getStreamUrl(threadId: string): string {
   return buildUrl(`/automl/${encodeURIComponent(threadId)}/stream`);
 }
 
+export async function predict(
+  threadId: string,
+  file: File,
+  signal?: AbortSignal
+): Promise<string> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  let response: Response;
+  try {
+    response = await fetch(buildUrl(`/predict/${encodeURIComponent(threadId)}`), {
+      method: "POST",
+      body: formData,
+      signal,
+    });
+  } catch (error) {
+    throw new AppError(
+      toFriendlyMessage(error, "Failed to reach the prediction endpoint."),
+      error
+    );
+  }
+
+  if (!response.ok) {
+    const message = await parseResponseError(
+      response,
+      "Prediction failed. Please check your file and try again."
+    );
+    throw new AppError(message);
+  }
+
+  return response.text();
+}
+
 export async function getArtifacts(
   threadId: string,
   signal?: AbortSignal

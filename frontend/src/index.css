@@ -11,6 +11,11 @@
     @apply border-neutral-800;
   }
 
+  html,
+  body {
+    @apply h-full overflow-hidden;
+  }
+
   body {
     @apply bg-neutral-950 text-neutral-100;
   }
