@@ -1,0 +1,50 @@
+name: Run LangSmith evals
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        eval_script:
+          - run_user_request_eval
+          - run_dataset_analysis_eval
+          - run_apply_clarification_eval
+          - run_plan_eval
+          - run_experiment_implementation_eval
+          - run_output_eval
+          - run_request_clarification_eval
+          - run_experiment_repair_eval
+          - run_output_repair_eval
+          - run_generate_summary_eval
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - run: pip install -r requirements.txt
+
+      # Informational only — evals log to LangSmith for review, but a bad
+      # score (or a flaky API call) doesn't block the PR/merge.
+      - name: Run ${{ matrix.eval_script }}
+        continue-on-error: true
+        run: python -m evals.${{ matrix.eval_script }}
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          LANGSMITH_PROJECT: ${{ vars.LANGSMITH_PROJECT }}
