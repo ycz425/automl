@@ -13,6 +13,7 @@ export default function App() {
     errorMessage,
     isSubmitting,
     isPredicting,
+    predictionHistory,
     isComposerEnabled,
     canAttachFile,
     isPredictMode,
@@ -61,6 +62,7 @@ export default function App() {
       {isPredictMode ? (
         <PredictBar
           isPredicting={isPredicting}
+          predictionHistory={predictionHistory}
           onPredict={runPrediction}
           onInvalidFile={setErrorMessage}
         />

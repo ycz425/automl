@@ -280,6 +280,7 @@ class OutputAgent():
         metrics_path = os.path.join(output_dir, 'metrics.json')
         plan_path = os.path.join(output_dir, 'plan.json')
         requirements_path = os.path.join(output_dir, 'requirements.txt')
+        reference_data_path = os.path.join(output_dir, 'reference_data.csv')
         
         for attempt in range(max_retries + 1):
             if self.verbose:
@@ -295,6 +296,11 @@ class OutputAgent():
                     json.dump(best_experiment.result.model_dump(), f, indent=4)
                 with open(plan_path, 'w') as f:
                     json.dump(best_experiment.plan.model_dump(), f, indent=4)
+
+                df = pd.read_csv(data_path)
+                df = df[dataset_analysis.feature_columns]
+                df = df.sample(n=min(len(df), 2000), random_state=42)
+                df.to_csv(reference_data_path, index=False)
 
                 # FOR DEBUGGING
                 # with open(os.path.join(output_dir, 'experiments.json'), 'w') as f:

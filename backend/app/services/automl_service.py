@@ -1,18 +1,18 @@
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 from app.graph.schemas.state import AutoMLState
-from app.graph.graph import graph
 from app.graph.context import AutoMLContext
 from app.services.status_store import StatusStore
 from app.services.file_storage import FileStorage
 from langsmith import traceable
+from datetime import datetime
 
 
 class AutoMLService:
-    def __init__(self, graph: CompiledStateGraph,):
+    def __init__(self, graph: CompiledStateGraph, status_store: StatusStore = StatusStore(), file_storage: FileStorage = FileStorage()):
         self.graph = graph
-        self.status_store = StatusStore()
-        self.file_storage = FileStorage()
+        self.status_store = status_store
+        self.file_storage = file_storage
 
     @traceable(name="automl_run", run_type="chain")
     async def start(self, user_input: str, dataset_id: str, thread_id: str):
@@ -26,10 +26,12 @@ class AutoMLService:
         # await self.graph.ainvoke(initial_state, config=config, context=self._context())
         try:
             await self.graph.ainvoke(initial_state, config=config, context=self._context())
-        except:
+        except Exception as e:
+            print(f'{datetime.now()} [AutoMLService.start] run failed: {e!r}')
             await self.status_store.update(
                 thread_id,
                 status='failed',
+                node='prompt_agent',
                 message='Failed.'
             )
     
@@ -39,10 +41,12 @@ class AutoMLService:
         # await self.graph.ainvoke(Command(resume=user_input), config=config, context=self._context())
         try:
             await self.graph.ainvoke(Command(resume=user_input), config=config, context=self._context())
-        except:
+        except Exception as e:
+            print(f'{datetime.now()} [AutoMLService.resume] run failed: {e!r}')
             await self.status_store.update(
                 thread_id,
                 status='failed',
+                node='prompt_agent',
                 message='Failed.'
             )
 
@@ -73,7 +77,3 @@ class AutoMLService:
                 "thread_id": thread_id,
             }
         }
-
-    
-
-automl_service = AutoMLService(graph)

@@ -119,5 +119,3 @@ def build_graph():
     checkpointer = InMemorySaver(serde=serde)
     graph = builder.compile(checkpointer=checkpointer)
     return graph
-
-graph = build_graph()

@@ -53,6 +53,30 @@ export type AutoMLResponse = {
   artifacts?: Artifact[];
 };
 
+export type DriftColumnScore = {
+  method: string;
+  value: number;
+  threshold: number;
+  drifted: boolean;
+};
+
+// One entry per /predict call. "insufficient_data" means the rolling window
+// hasn't reached rows_needed yet, so no drift check ran for that call.
+export type PredictionLogEntry = {
+  timestamp: string;
+  rows_recorded: number;
+  window_size: number;
+  status: "insufficient_data" | "ok";
+  rows_needed?: number;
+  dataset_drift?: boolean;
+  drifted_columns?: string[];
+  column_scores?: Record<string, DriftColumnScore>;
+};
+
+export type PredictionMetricsResponse = {
+  history: PredictionLogEntry[];
+};
+
 export const PIPELINE_NODES: AutoMLNode[] = [
   "prompt_agent",
   "data_agent",

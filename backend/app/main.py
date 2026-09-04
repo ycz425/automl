@@ -1,7 +1,10 @@
 from fastapi import FastAPI, BackgroundTasks, HTTPException, File, UploadFile
 from fastapi.responses import FileResponse, EventSourceResponse, Response
 from pydantic import BaseModel
-from app.services.automl_service import automl_service
+from app.services.automl_service import AutoMLService
+from app.services.prediction_service import PredictionService, ArtifactNotFoundError
+from app.services.file_storage import FileStorage
+from app.graph.graph import build_graph
 from app.services.status_store import automl_node, automl_status
 import subprocess
 import tempfile
@@ -12,7 +15,9 @@ from uuid import uuid4, UUID
 import mimetypes
 import os
 
-
+file_storage = FileStorage()
+automl_service = AutoMLService(build_graph(), file_storage=file_storage)
+prediction_service = PredictionService(file_storage=file_storage)
 
 class StartAutoMLRequest(BaseModel):
     message: str
@@ -40,6 +45,10 @@ class DatasetUploadResponse(BaseModel):
 
 class GetArtifactsResponse(BaseModel):
     artifacts: list[str]
+
+
+class PredictionMetricsResponse(BaseModel):
+    history: list[dict]
 
 
 app = FastAPI()
@@ -124,14 +133,14 @@ async def upload_dataset(file: Annotated[UploadFile, File()]):
         raise HTTPException(status_code=400, detail=f"Extension '{ext}' not allowed")
     
     dataset_id = str(uuid4())
-    destination = await automl_service.file_storage.save_dataset(dataset_id, file)
+    destination = await file_storage.save_dataset(dataset_id, file)
 
     return DatasetUploadResponse(dataset_id=str(dataset_id), destination=str(destination))
 
 
 @app.get("/artifact/{thread_id}", response_model=GetArtifactsResponse)
 async def get_artifacts(thread_id: str):
-    artifacts = await automl_service.file_storage.get_run_artifacts(thread_id)
+    artifacts = await file_storage.get_run_artifacts(thread_id)
     return GetArtifactsResponse(artifacts=artifacts)
 
 
@@ -139,99 +148,66 @@ async def get_artifacts(thread_id: str):
 async def download_artifact(thread_id: str, filename: str):
     media_type, _ = mimetypes.guess_type(filename)
     return FileResponse(
-        path=os.path.join(await automl_service.file_storage.get_run_directory(thread_id), filename),
+        path=os.path.join(await file_storage.get_run_directory(thread_id), filename),
         filename=filename,
         media_type=media_type or "application/octet-stream"
     )
 
 @app.post("/predict/{thread_id}")
 async def predict(thread_id: str, file: Annotated[UploadFile, File()]):
-    run_dir = await automl_service.file_storage.get_run_directory(thread_id)
-    model_path = str(run_dir / 'model.joblib')
-    predict_path = str(run_dir / 'predict.py')
-    requirements_path = str(run_dir / 'requirements.txt')
-
-    if not os.path.exists(model_path) or not os.path.exists(predict_path) or not os.path.exists(requirements_path):
+    try:
+        preds_df = await prediction_service.predict(file, thread_id)
+    except ArtifactNotFoundError:
         raise HTTPException(
             status_code=404,
             detail="Required artifacts not found"
         )
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Prediction failed: {e.stderr or e.stdout or str(e)}"
+        )
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        input_path = os.path.join(temp_dir, 'input.csv')
-        env_dir = os.path.join(temp_dir, '.venv')
-        output_path = os.path.join(temp_dir, 'output.csv')
-
-        with open(input_path, 'wb') as f:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                f.write(chunk)
-
-        if os.name == "nt":
-            env_python = os.path.join(env_dir, "Scripts", "python.exe")
-        else:
-            env_python = os.path.join(env_dir, "bin", "python")
-
-        try:
-            await asyncio.to_thread(
-                subprocess.run,
-                [sys.executable, '-m', 'venv', '--clear', env_dir],
-                check=True,
-                capture_output=True,
-                text=True
-            )
-
-            await asyncio.to_thread(
-                subprocess.run,
-                [env_python, "-m", "pip", "install", "-r", requirements_path],
-                check=True,
-                capture_output=True,
-                text=True
-            )
-
-            await asyncio.to_thread(
-                subprocess.run,
-                [env_python, predict_path, '--model', model_path, '--input', input_path, '--output', output_path],
-                check=True,
-                capture_output=True,
-                text=True
-            )
-            
-        except subprocess.CalledProcessError as e:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Prediction failed: {e.stderr or e.stdout or str(e)}"
-            )
-
-        with open(output_path, 'rb') as f:
-            content = f.read()
+    try:
+        await prediction_service.record_data(file, thread_id)
+    except Exception as e:
+        print(f'[predict] record_data failed for thread {thread_id}: {e!r}')
 
     return Response(
-        content=content,
+        content=preds_df.to_csv(index=False).encode("utf-8"),
         media_type='text/csv'
     )
 
 
+@app.get("/predict/{thread_id}/metrics", response_model=PredictionMetricsResponse)
+async def get_prediction_metrics(thread_id: str):
+    if not (await file_storage.run_exists(thread_id)):
+        raise HTTPException(
+            status_code=404,
+            detail="AutoML thread not found"
+        )
+    history = await prediction_service.get_drift_history(thread_id)
+    return PredictionMetricsResponse(history=history)
+
+
 @app.delete("/artifact/{thread_id}/delete", status_code=204)
 async def delete_artifacts(thread_id: str):
-    if not (await automl_service.file_storage.run_exists(thread_id)):
+    if not (await file_storage.run_exists(thread_id)):
         raise HTTPException(
             status_code=404,
             detail="Artifacts not found"
         )
-    await automl_service.file_storage.delete_run(thread_id)
+    await file_storage.delete_run(thread_id)
 
 
 @app.delete("/dataset/{dataset_id}/delete", status_code=204)
 async def delete_dataset(dataset_id: str):
-    if not (await automl_service.file_storage.dataset_exists(dataset_id)):
+    if not (await file_storage.dataset_exists(dataset_id)):
         raise HTTPException(
             status_code=404,
             detail="Dataset not found"
         )
-    await automl_service.file_storage.delete_dataset(dataset_id)
+    await file_storage.delete_dataset(dataset_id)
 
 
 @app.delete("/status/{thread_id}/delete", status_code=204)

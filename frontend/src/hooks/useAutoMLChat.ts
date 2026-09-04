@@ -1,16 +1,17 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   deleteArtifacts,
   deleteDataset,
   deleteStatus,
   getArtifactDownloadUrl,
   getArtifacts,
+  getPredictionMetrics,
   predict,
   resumeAutoML,
   startAutoML,
   uploadDataset,
 } from "../api/automlApi";
-import type { AutoMLNode, AutoMLResponse } from "../types/automl";
+import type { AutoMLNode, AutoMLResponse, PredictionLogEntry } from "../types/automl";
 import type { ChatMessage, RunState } from "../types/chat";
 import { toFriendlyMessage } from "../utils/errors";
 import { generateId } from "../utils/files";
@@ -93,6 +94,7 @@ export function useAutoMLChat() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPredicting, setIsPredicting] = useState(false);
+  const [predictionHistory, setPredictionHistory] = useState<PredictionLogEntry[]>([]);
 
   const { connect, close } = useAutoMLStream();
   const progressMessageIdRef = useRef<string | null>(null);
@@ -406,6 +408,16 @@ export function useAutoMLChat() {
     [isSubmitting, threadId, addMessage]
   );
 
+  const refreshPredictionMetrics = useCallback(async (activeThreadId: string) => {
+    try {
+      const response = await getPredictionMetrics(activeThreadId);
+      setPredictionHistory(response.history);
+    } catch {
+      // Monitoring is a bonus view on top of a successful prediction —
+      // failing to refresh it shouldn't surface as a user-facing error.
+    }
+  }, []);
+
   const runPrediction = useCallback(
     async (file: File) => {
       if (isPredicting || !threadId) return;
@@ -443,6 +455,7 @@ export function useAutoMLChat() {
           content: "",
           attachment: { name: outputName, csvText, caption: "Predictions" },
         });
+        await refreshPredictionMetrics(threadId);
       } catch (error) {
         removeMessage(progressId);
         const friendly = toFriendlyMessage(
@@ -460,7 +473,7 @@ export function useAutoMLChat() {
         setIsPredicting(false);
       }
     },
-    [isPredicting, threadId, addMessage, removeMessage]
+    [isPredicting, threadId, addMessage, removeMessage, refreshPredictionMetrics]
   );
 
   const sendMessage = useCallback(
@@ -501,6 +514,7 @@ export function useAutoMLChat() {
     setSelectedFile(null);
     setErrorMessage(null);
     setIsSubmitting(false);
+    setPredictionHistory([]);
     setRunState("idle");
   }, [close, threadId, datasetId]);
 
@@ -604,6 +618,15 @@ export function useAutoMLChat() {
     };
   }, []);
 
+  // Restores the monitoring dashboard after a page reload lands back in
+  // predict mode — the history lives server-side in the run directory, so
+  // there's nothing to persist client-side, just a re-fetch on mount.
+  useEffect(() => {
+    if (runState === "completed" && threadId) {
+      refreshPredictionMetrics(threadId);
+    }
+  }, [runState, threadId, refreshPredictionMetrics]);
+
   const isComposerEnabled =
     (runState === "idle" || runState === "awaiting_clarification") &&
     !isSubmitting;
@@ -625,6 +648,7 @@ export function useAutoMLChat() {
     errorMessage,
     isSubmitting,
     isPredicting,
+    predictionHistory,
     isComposerEnabled,
     canAttachFile,
     isPredictMode,

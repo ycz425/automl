@@ -1,6 +1,7 @@
 import type {
   DatasetUploadResponse,
   GetArtifactsResponse,
+  PredictionMetricsResponse,
   ResumeAutoMLRequest,
   RunAutoMLResponse,
   StartAutoMLRequest,
@@ -127,6 +128,17 @@ export async function predict(
   }
 
   return response.text();
+}
+
+export async function getPredictionMetrics(
+  threadId: string,
+  signal?: AbortSignal
+): Promise<PredictionMetricsResponse> {
+  return requestJson<PredictionMetricsResponse>(
+    buildUrl(`/predict/${encodeURIComponent(threadId)}/metrics`),
+    { method: "GET", signal },
+    "Failed to load prediction monitoring data."
+  );
 }
 
 export async function getArtifacts(

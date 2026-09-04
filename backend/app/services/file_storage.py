@@ -31,6 +31,8 @@ class FileStorage:
         self.runs_directory.mkdir(parents=True, exist_ok=True)
 
     async def save_dataset(self, dataset_id: str, file: UploadFile):
+        await file.seek(0)
+
         dataset_directory = self.datasets_directory / str(dataset_id)
         dataset_directory.mkdir(parents=True, exist_ok=False)
 
