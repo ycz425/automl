@@ -1,5 +1,6 @@
 from app.graph.schemas.state import AutoMLState
 from app.agents.output_agent import OutputAgent
+from app.agents.summary_agent import SummaryAgent
 from langgraph.runtime import Runtime
 from app.graph.context import AutoMLContext, report_status
 from datetime import datetime
@@ -14,6 +15,7 @@ async def output_agent_node(state: AutoMLState, runtime: Runtime[AutoMLContext])
     if state.verbose:
         print(f'{datetime.now()} [OUTPUT AGENT]')
     output_agent = OutputAgent(verbose=state.verbose)
+    summary_agent = SummaryAgent(verbose=state.verbose)
     await output_agent.generate_output(
         state.user_request,
         state.dataset_analysis,
@@ -23,5 +25,5 @@ async def output_agent_node(state: AutoMLState, runtime: Runtime[AutoMLContext])
     )
 
     return {
-        'summary': await output_agent.generate_summary(state.user_request, state.experiments)
+        'summary': await summary_agent.generate_summary(state.user_request, state.experiments)
     }

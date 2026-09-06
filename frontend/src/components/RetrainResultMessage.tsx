@@ -49,7 +49,7 @@ function MetricComparisonRow({
       </td>
       <td
         className={[
-          "py-2 pr-3 align-middle tabular-nums",
+          "py-2 pl-3 pr-3 align-middle tabular-nums",
           championIsBetter ? "text-emerald-400" : "text-neutral-400",
         ].join(" ")}
       >
@@ -57,7 +57,7 @@ function MetricComparisonRow({
       </td>
       <td
         className={[
-          "py-2 align-middle tabular-nums",
+          "py-2 pl-3 pr-3 align-middle tabular-nums",
           challengerIsBetter ? "text-emerald-400" : "text-neutral-400",
         ].join(" ")}
       >

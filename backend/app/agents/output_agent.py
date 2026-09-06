@@ -1,9 +1,9 @@
 from app.agents.base import LLMAgent
-from app.graph.schemas.user_request import UserRequest, MetricEntry
+from app.graph.schemas.user_request import UserRequest
 from app.graph.schemas.experiment import Experiment
 from app.graph.schemas.output import OutputScripts
 from app.graph.schemas.data_info import DatasetAnalysis
-from app.services.tracing import traced_interactions_create
+from app.utils.experiments import pick_best_experiment
 from app.utils.model_scripts import create_venv, run_train_script, run_predict_script, format_subprocess_error
 from langsmith import traceable
 from datetime import datetime
@@ -16,29 +16,6 @@ import os
 
 
 class OutputAgent(LLMAgent):
-    def best_experiment(self, primary_metric: MetricEntry, experiments: list[Experiment], return_index=False):
-        direction = primary_metric.direction
-
-        best_metric = None
-        best_experiment = None
-        best_idx = None
-        for idx, experiment in enumerate(experiments):
-            metric = [metric_entry.value for metric_entry in experiment.result.metrics if metric_entry.metric == primary_metric.name][0]
-
-            if (
-                (best_metric is None) or
-                (direction == 'max' and metric > best_metric) or
-                (direction == 'min' and metric < best_metric)
-            ):
-                best_metric = metric
-                best_experiment = experiment
-                best_idx = idx
-
-        if return_index:
-            return best_idx
-        else:
-            return best_experiment
-
     @traceable(name="OutputAgent.generate_scripts")
     async def generate_scripts(self, experiment: Experiment, dataset_analysis: DatasetAnalysis, max_retries=5):
         if self.verbose:
@@ -145,52 +122,10 @@ class OutputAgent(LLMAgent):
                 f"Expected {len(pd.read_csv(test_input))} output rows (one per input row), got {len(df)}."
             )
 
-    @traceable(name="OutputAgent.generate_summary")
-    async def generate_summary(self, user_request: UserRequest,  experiments: list[Experiment]):
-        best_experiment_idx = self.best_experiment(user_request.primary_metric, experiments, return_index=True)
-
-        prompt = f"""
-        Using the provided user_request, ordered list of experiments, and best_experiment_idx, generate a concise summary of the experimentation process.
-
-        User request:
-        {user_request}
-
-        Experiments:
-        {experiments}
-
-        Best experiment index:
-        {best_experiment_idx}
-
-        Requirements:
-
-        - Describe each experiment in chronological order.
-        - For each experiment, briefly summarize the approach, important configuration changes, and results.
-        - Explain how the experiments evolved based on earlier outcomes.
-        - Assume best experiment index is zero-based, but refer to experiments using one-based numbering.
-        - State why the experiment specified by best experiment index was the best based on the primary metric specified in user request.
-        - Include the best experiment's primary metric value and any important tradeoffs or supporting metrics.
-        - For any experiment whose result has a non-null `threshold` (binary classification with a tuned decision threshold), state that tuned threshold value alongside its metrics — especially for the best experiment, since that threshold is the one actually used for deployed predictions.
-        - Do not invent missing information.
-        - Keep the summary clear, factual, and concise.
-        - Return only the final summary using markdown.
-        """
-
-        interaction = await traced_interactions_create(
-            self.client,
-            model=self.model,
-            input=prompt,
-            generation_config={
-                'thinking_level': 'low',
-                'temperature': 0
-            }
-        )
-
-        return interaction.output_text
-
     @traceable(name="OutputAgent.generate_output")
     async def generate_output(self, user_request: UserRequest, dataset_analysis: DatasetAnalysis, experiments: list[Experiment], data_path: str, output_dir="out", max_retries=5):
         primary_metric = user_request.primary_metric
-        best_experiment = self.best_experiment(primary_metric, experiments)
+        best_experiment = pick_best_experiment(primary_metric, experiments)
         output_scripts = await self.generate_scripts(best_experiment, dataset_analysis)
 
         train_path = os.path.join(output_dir, 'train.py')
