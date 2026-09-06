@@ -5,11 +5,13 @@ from app.graph.context import AutoMLContext
 from app.services.status_store import StatusStore
 from app.services.file_storage import FileStorage
 from langsmith import traceable
+import asyncio
+from google.cloud import firestore
 from datetime import datetime
 
 
 class AutoMLService:
-    def __init__(self, graph: CompiledStateGraph, status_store: StatusStore = StatusStore(), file_storage: FileStorage = FileStorage()):
+    def __init__(self, graph: CompiledStateGraph, status_store: StatusStore, file_storage: FileStorage):
         self.graph = graph
         self.status_store = status_store
         self.file_storage = file_storage
@@ -31,8 +33,7 @@ class AutoMLService:
             await self.status_store.update(
                 thread_id,
                 status='failed',
-                node='prompt_agent',
-                message='Failed.'
+                message=f'An unexpected error occurred: {e}'
             )
     
     @traceable(name="automl_resume", run_type="chain")
@@ -46,8 +47,7 @@ class AutoMLService:
             await self.status_store.update(
                 thread_id,
                 status='failed',
-                node='prompt_agent',
-                message='Failed.'
+                message=f'An unexpected error occurred: {e}'
             )
 
 
@@ -64,9 +64,12 @@ class AutoMLService:
             'message': message
         }
 
+    async def subscribe(self, thread_id: str) -> tuple[asyncio.Event, firestore.Watch]:
+        return await self.status_store.subscribe(thread_id)
+
     async def exists(self, thread_id: str):
         return (await self.graph.checkpointer.aget_tuple(self._config(thread_id))) is not None
-        
+
     def _context(self):
         return AutoMLContext(status_store=self.status_store, file_storage=self.file_storage)
             

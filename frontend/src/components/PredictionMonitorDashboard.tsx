@@ -1,9 +1,10 @@
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Database } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Database, RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { PredictionLogEntry } from "../types/automl";
 
 type PredictionMonitorDashboardProps = {
   history: PredictionLogEntry[];
+  onOpenRetrain: () => void;
 };
 
 const SPARKLINE_WIDTH = 300;
@@ -14,7 +15,8 @@ const ROW_TREND_WIDTH = 96;
 const ROW_TREND_HEIGHT = 32;
 const ROW_TREND_PAD = 3;
 
-function formatScore(value: number): string {
+function formatScore(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "—";
   if (value === 0) return "0";
   const abs = Math.abs(value);
   if (abs < 0.001 || abs >= 100000) return value.toExponential(2);
@@ -41,7 +43,7 @@ function ColumnTrend({
   latestDrifted,
 }: {
   series: SeriesPoint[];
-  threshold: number;
+  threshold: number | null;
   latestDrifted: boolean;
 }) {
   if (series.length < 2) {
@@ -49,8 +51,8 @@ function ColumnTrend({
   }
 
   const values = series.map((p) => p.y);
-  const minVal = Math.min(...values, threshold);
-  const maxVal = Math.max(...values, threshold);
+  const minVal = threshold === null ? Math.min(...values) : Math.min(...values, threshold);
+  const maxVal = threshold === null ? Math.max(...values) : Math.max(...values, threshold);
   const range = maxVal - minVal || 1;
   const maxX = series[series.length - 1].x || 1;
 
@@ -60,7 +62,7 @@ function ColumnTrend({
     ROW_TREND_HEIGHT - ROW_TREND_PAD - ((y - minVal) / range) * (ROW_TREND_HEIGHT - 2 * ROW_TREND_PAD);
 
   const points = series.map((p) => `${toX(p.x)},${toY(p.y)}`).join(" ");
-  const thresholdY = toY(threshold);
+  const thresholdY = threshold === null ? null : toY(threshold);
 
   return (
     <svg
@@ -68,18 +70,20 @@ function ColumnTrend({
       height={ROW_TREND_HEIGHT}
       viewBox={`0 0 ${ROW_TREND_WIDTH} ${ROW_TREND_HEIGHT}`}
       role="img"
-      aria-label={`Score trend, latest ${values[values.length - 1]}, threshold ${threshold}`}
+      aria-label={`Score trend, latest ${values[values.length - 1]}${threshold === null ? "" : `, threshold ${threshold}`}`}
     >
-      <line
-        x1={0}
-        x2={ROW_TREND_WIDTH}
-        y1={thresholdY}
-        y2={thresholdY}
-        stroke="currentColor"
-        strokeWidth={1}
-        strokeDasharray="2,2"
-        className="text-neutral-700"
-      />
+      {thresholdY !== null && (
+        <line
+          x1={0}
+          x2={ROW_TREND_WIDTH}
+          y1={thresholdY}
+          y2={thresholdY}
+          stroke="currentColor"
+          strokeWidth={1}
+          strokeDasharray="2,2"
+          className="text-neutral-700"
+        />
+      )}
       <polyline
         points={points}
         fill="none"
@@ -94,7 +98,7 @@ function ColumnTrend({
 // Renders inset inside PredictBar's shared box, styled as its own rounded
 // card (matching CsvMessageBubble's convention) rather than a flush,
 // edge-to-edge row.
-export function PredictionMonitorDashboard({ history }: PredictionMonitorDashboardProps) {
+export function PredictionMonitorDashboard({ history, onOpenRetrain }: PredictionMonitorDashboardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Cumulative rows processed so far, aligned to each entry — used as every
@@ -110,6 +114,7 @@ export function PredictionMonitorDashboard({ history }: PredictionMonitorDashboa
       if (entry.status === "ok") {
         okPoints.push({ x: cumulativeRows, y: entry.drifted_columns?.length ?? 0 });
         for (const [column, score] of Object.entries(entry.column_scores ?? {})) {
+          if (score.value === null) continue;
           (series[column] ??= []).push({ x: cumulativeRows, y: score.value });
         }
       }
@@ -204,6 +209,24 @@ export function PredictionMonitorDashboard({ history }: PredictionMonitorDashboa
               <ChevronRight className="h-4 w-4 shrink-0 text-neutral-500" aria-hidden="true" />
             ))}
         </button>
+
+        {latest.status === "ok" && (
+          <div className="border-t border-neutral-800 px-4 py-2.5">
+            <button
+              type="button"
+              onClick={onOpenRetrain}
+              className={[
+                "flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                latest.dataset_drift
+                  ? "text-amber-400 hover:bg-amber-500/10"
+                  : "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200",
+              ].join(" ")}
+            >
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+              {latest.dataset_drift ? "Drift detected — retrain model" : "Retrain model"}
+            </button>
+          </div>
+        )}
 
         {isExpanded && latest.status === "ok" && (
           <div className="border-t border-neutral-800 bg-neutral-900 px-4 py-3">

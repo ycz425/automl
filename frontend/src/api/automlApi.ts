@@ -3,6 +3,8 @@ import type {
   GetArtifactsResponse,
   PredictionMetricsResponse,
   ResumeAutoMLRequest,
+  RetrainEvaluateResponse,
+  RetrainLabelResponse,
   RunAutoMLResponse,
   StartAutoMLRequest,
 } from "../types/automl";
@@ -155,6 +157,83 @@ export async function getArtifacts(
 export function getArtifactDownloadUrl(threadId: string, filename: string): string {
   return buildUrl(
     `/artifact/${encodeURIComponent(threadId)}/download/${encodeURIComponent(filename)}`
+  );
+}
+
+export async function getRunFileText(
+  threadId: string,
+  filename: string,
+  signal?: AbortSignal
+): Promise<string> {
+  let response: Response;
+  try {
+    response = await fetch(getArtifactDownloadUrl(threadId, filename), { signal });
+  } catch (error) {
+    throw new AppError(toFriendlyMessage(error, `Failed to load ${filename}.`), error);
+  }
+
+  if (!response.ok) {
+    const message = await parseResponseError(response, `Failed to load ${filename}.`);
+    throw new AppError(message);
+  }
+
+  return response.text();
+}
+
+export async function labelRetrainData(
+  threadId: string,
+  file: File,
+  signal?: AbortSignal
+): Promise<RetrainLabelResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  return requestJson<RetrainLabelResponse>(
+    buildUrl(`/retrain/${encodeURIComponent(threadId)}/label`),
+    { method: "POST", body: formData, signal },
+    "Failed to submit labels. Please check your file and try again."
+  );
+}
+
+export async function evaluateRetrain(
+  threadId: string,
+  datasetId: string,
+  signal?: AbortSignal
+): Promise<RetrainEvaluateResponse> {
+  return requestJson<RetrainEvaluateResponse>(
+    buildUrl(`/retrain/${encodeURIComponent(threadId)}`),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dataset_id: datasetId }),
+      signal,
+    },
+    "Failed to train and evaluate the new model. Please try again."
+  );
+}
+
+export async function promoteChallenger(
+  threadId: string,
+  datasetId: string,
+  signal?: AbortSignal
+): Promise<void> {
+  await requestJson<unknown>(
+    buildUrl(`/retrain/${encodeURIComponent(threadId)}/promote`),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dataset_id: datasetId }),
+      signal,
+    },
+    "Failed to promote the new model. Please try again."
+  );
+}
+
+export async function clearRetrain(threadId: string, signal?: AbortSignal): Promise<void> {
+  await requestJson<unknown>(
+    buildUrl(`/retrain/${encodeURIComponent(threadId)}/clear`),
+    { method: "POST", signal },
+    "Failed to discard the comparison. Please try again."
   );
 }
 

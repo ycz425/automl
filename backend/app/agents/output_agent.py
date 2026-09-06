@@ -1,19 +1,18 @@
 from google import genai
-from app.graph.schemas.user_request import UserRequest, Metric
+from app.graph.schemas.user_request import UserRequest, MetricEntry
 from app.graph.schemas.experiment import Experiment
 from app.graph.schemas.output import OutputScripts
 from app.graph.schemas.data_info import DatasetAnalysis
 from app.services.tracing import traced_interactions_create
+from app.utils.model_scripts import create_venv, run_train_script, run_predict_script
 from langsmith import traceable
 from pydantic import ValidationError
 from datetime import datetime
 import pandas as pd
 import subprocess
-import asyncio
 import tempfile
 import shutil
 import json
-import sys
 import dotenv
 import os
 
@@ -27,7 +26,7 @@ class OutputAgent():
             self.model = model
             self.verbose = verbose
 
-    def best_experiment(self, primary_metric: Metric, experiments: list[Experiment], return_index=False):
+    def best_experiment(self, primary_metric: MetricEntry, experiments: list[Experiment], return_index=False):
         direction = primary_metric.direction
 
         best_metric = None
@@ -70,10 +69,13 @@ class OutputAgent():
                 "- The training script must train the selected model on the full dataset.\n"
                 "- Preserve the preprocessing, feature selection, model architecture, and hyperparameters from the selected experiment.\n"
                 "- The training script must save the complete fitted pipeline as a joblib file to the output path provided as a command-line argument.\n"
+                "- The input CSV accepted by the training script must contain the columns listed in dataset analysis's feature_columns plus the target column; drop any other columns present, if any (including the group column, if one is specified — it is only used for splitting, never as a model input).\n"
                 "- The prediction script must load the fitted pipeline from the model joblib path provided as a command-line argument, accept unseen CSV data, and write predictions to a CSV file.\n"
                 "- The input CSV accepted by the prediction script must contain the columns listed in dataset analysis's feature_columns; drop any other columns present, if any.\n"
-                "- The output CSV must be the same as the input CSV (after dropping irrelevant columns) with a single 'prediction' column appended as the very last column.\n"
-                "- If the model supports probabilities, output them in one or more columns placed before the final 'prediction' column, never after it — 'prediction' must always be the last column.\n"
+                "- The output CSV must contain exactly one column, named 'pred', with one row per input row in the same order as the input. Do not include the input columns or an index column in the output.\n"
+                "- For regression, 'pred' must contain the predicted numeric value.\n"
+                "- For multiclass classification, 'pred' must contain the exact class label as it appears in the target column (e.g. the original string or value used in training) — never a numeric class index or another encoded representation.\n"
+                "- For binary classification, the prediction script must accept an optional '--threshold' command-line argument giving the path to a threshold.json file; omit the flag entirely to skip thresholding. If '--threshold' is provided and the file's 'threshold' value is not null, compute the predicted probability of the class named in dataset analysis's positive_class field, then set 'pred' to positive_class when that probability is greater than or equal to the threshold and to the other class otherwise. If '--threshold' is provided but the file's 'threshold' value is null, set 'pred' to the model's default predicted class label. If '--threshold' is not provided at all, set 'pred' to the predicted probability of the class named in dataset analysis's positive_class field, as a float, instead of a class label. The '--threshold' argument has no effect for regression or multiclass classification.\n"
                 "- Use only the dependencies listed in the output.\n"
                 "- Do not change the selected experiment unless necessary to fix an implementation issue.\n"
                 "- Both scripts must be executable directly from the command line.\n"
@@ -81,7 +83,7 @@ class OutputAgent():
                 "- The training script must support:\n"
                 "    python train.py --input DATA.csv --output model.joblib\n"
                 "- The prediction script must support:\n"
-                "    python predict.py --model model.joblib --input DATA.csv --output predictions.csv\n"
+                "    python predict.py --model model.joblib --input DATA.csv --output predictions.csv [--threshold threshold.json]\n"
                 "- Include a standard `if __name__ == '__main__':` entry point in both scripts.\n"
                 "- Do not include explanations, markdown, or code fences.\n"
                 "- Return only valid JSON matching the Output schema."
@@ -146,11 +148,14 @@ class OutputAgent():
             - The training script must support:
                 python train.py --input DATA.csv --output model.joblib
             - The prediction script must support:
-                python predict.py --model model.joblib --input DATA.csv --output predictions.csv
+                python predict.py --model model.joblib --input DATA.csv --output predictions.csv [--threshold threshold.json]
             - The prediction script must load the fitted model from the --model path.
+            - The input CSV accepted by the training script must contain the columns listed in dataset analysis's feature_columns plus the target column; drop any other columns present, if any (including the group column, if one is specified — it is only used for splitting, never as a model input).
             - The input CSV accepted by the prediction script must contain the columns listed in dataset analysis's feature_columns; drop any other columns present, if any.
-            - The output CSV must be the same as the input CSV (after dropping irrelevant columns) with a single 'prediction' column appended as the very last column.
-            - If the model supports probability prediction, output it in one or more columns placed before the final 'prediction' column, never after it — 'prediction' must always be the last column.
+            - The output CSV must contain exactly one column, named 'pred', with one row per input row in the same order as the input. Do not include the input columns or an index column in the output.
+            - For regression, 'pred' must contain the predicted numeric value.
+            - For multiclass classification, 'pred' must contain the exact class label as it appears in the target column (e.g. the original string or value used in training) — never a numeric class index or another encoded representation.
+            - For binary classification, the prediction script must accept an optional '--threshold' command-line argument giving the path to a threshold.json file; omit the flag entirely to skip thresholding. If '--threshold' is provided and the file's 'threshold' value is not null, compute the predicted probability of the class named in dataset analysis's positive_class field, then set 'pred' to positive_class when that probability is greater than or equal to the threshold and to the other class otherwise. If '--threshold' is provided but the file's 'threshold' value is null, set 'pred' to the model's default predicted class label. If '--threshold' is not provided at all, set 'pred' to the predicted probability of the class named in dataset analysis's positive_class field, as a float, instead of a class label. The '--threshold' argument has no effect for regression or multiclass classification.
             - Ensure all required dependencies are listed.
             - Ensure both scripts are complete, directly executable, and use argparse.
             - Do not change the selected experiment unless necessary to fix an implementation issue.
@@ -187,7 +192,7 @@ class OutputAgent():
                 if self.verbose:
                     print(f'{datetime.now()}     OutputScripts model validation failed - retrying... (attempt: {attempt + 1}/{max_retries})')
 
-    async def validate_predict_script(self, env_python:str, predict_path: str, data_path: str, model_path: str, feature_columns: str):
+    async def validate_predict_script(self, env_python:str, predict_path: str, data_path: str, model_path: str, threshold_path: str):
         with tempfile.TemporaryDirectory() as temp_dir:
             test_input = os.path.join(temp_dir, "test_input.csv")
             test_output = os.path.join(temp_dir, "test_output.csv")
@@ -196,36 +201,17 @@ class OutputAgent():
             df = df.iloc[:5]
             df.to_csv(test_input, index=False)
 
-            await asyncio.to_thread(
-                subprocess.run,
-                [env_python, predict_path, '--model', model_path, '--input', test_input, '--output', test_output],
-                check=True,
-                text=True,
-                capture_output=True
-            )
+            await run_predict_script(env_python, predict_path, model_path, test_input, test_output, threshold_path)
             df = pd.read_csv(test_output)
 
             output_columns = df.columns.tolist()
-            assert output_columns and output_columns[-1] == 'prediction', (
-                f"Expected 'prediction' to be the last output column, but the last column was "
-                f"'{output_columns[-1] if output_columns else None}'. If probability columns are "
-                f"included, they must come before 'prediction', not after. "
-                f"Full output columns: {output_columns}"
+            assert output_columns == ['pred'], (
+                f"Expected the output CSV to contain exactly one column named 'pred', "
+                f"but found: {output_columns}"
             )
 
-            # A probability column (or columns) is expected whenever the model supports
-            # predict_proba, but must appear before the final 'prediction' column, not after.
-            non_feature_columns = set(output_columns) - set(feature_columns) - {'prediction'}
-            unexpected_columns = {c for c in non_feature_columns if not c.lower().startswith('prob')}
-            assert not unexpected_columns, (
-                f"Output CSV has unexpected columns not in feature_columns, 'prediction', or a "
-                f"probability column: {sorted(unexpected_columns)}. Full output columns: {output_columns}"
-            )
-
-            missing_columns = set(feature_columns) - set(output_columns)
-            assert not missing_columns, (
-                f"Output CSV is missing expected feature columns: {sorted(missing_columns)}. "
-                f"Full output columns: {output_columns}"
+            assert len(df) == len(pd.read_csv(test_input)), (
+                f"Expected {len(pd.read_csv(test_input))} output rows (one per input row), got {len(df)}."
             )
 
     @traceable(name="OutputAgent.generate_summary")
@@ -252,6 +238,7 @@ class OutputAgent():
         - Assume best experiment index is zero-based, but refer to experiments using one-based numbering.
         - State why the experiment specified by best experiment index was the best based on the primary metric specified in user request.
         - Include the best experiment's primary metric value and any important tradeoffs or supporting metrics.
+        - For any experiment whose result has a non-null `threshold` (binary classification with a tuned decision threshold), state that tuned threshold value alongside its metrics — especially for the best experiment, since that threshold is the one actually used for deployed predictions.
         - Do not invent missing information.
         - Keep the summary clear, factual, and concise.
         - Return only the final summary using markdown.
@@ -270,7 +257,8 @@ class OutputAgent():
         return interaction.output_text
 
     @traceable(name="OutputAgent.generate_output")
-    async def generate_output(self, primary_metric: Metric, dataset_analysis: DatasetAnalysis, experiments: list[Experiment], data_path: str, output_dir="out", max_retries=5):
+    async def generate_output(self, user_request: UserRequest, dataset_analysis: DatasetAnalysis, experiments: list[Experiment], data_path: str, output_dir="out", max_retries=5):
+        primary_metric = user_request.primary_metric
         best_experiment = self.best_experiment(primary_metric, experiments)
         output_scripts = await self.generate_scripts(best_experiment, dataset_analysis)
 
@@ -279,6 +267,9 @@ class OutputAgent():
         model_path = os.path.join(output_dir, 'model.joblib')
         metrics_path = os.path.join(output_dir, 'metrics.json')
         plan_path = os.path.join(output_dir, 'plan.json')
+        user_request_path = os.path.join(output_dir, 'user_request.json')
+        dataset_analysis_path = os.path.join(output_dir, 'dataset_analysis.json')
+        threshold_path = os.path.join(output_dir, 'threshold.json')
         requirements_path = os.path.join(output_dir, 'requirements.txt')
         reference_data_path = os.path.join(output_dir, 'reference_data.csv')
         
@@ -296,53 +287,28 @@ class OutputAgent():
                     json.dump(best_experiment.result.model_dump(), f, indent=4)
                 with open(plan_path, 'w') as f:
                     json.dump(best_experiment.plan.model_dump(), f, indent=4)
+                with open(dataset_analysis_path, 'w') as f:
+                    json.dump(dataset_analysis.model_dump(), f, indent=4)
+                with open(user_request_path, 'w') as f:
+                    json.dump(user_request.model_dump(), f, indent=4)
+                with open(threshold_path, 'w') as f:
+                    json.dump({'threshold': best_experiment.result.threshold}, f, indent=4)
 
                 df = pd.read_csv(data_path)
                 df = df[dataset_analysis.feature_columns]
                 df = df.sample(n=min(len(df), 2000), random_state=42)
                 df.to_csv(reference_data_path, index=False)
-
-                # FOR DEBUGGING
-                # with open(os.path.join(output_dir, 'experiments.json'), 'w') as f:
-                #     json.dump([experiment.model_dump() for experiment in experiments], f, indent=4)
-                # with open(os.path.join(output_dir, 'user_request.json'), 'w') as f:
-                #     json.dump(user_request.model_dump(), f, indent=4)
+                
 
                 with tempfile.TemporaryDirectory() as env_dir:
-                    await asyncio.to_thread(
-                        subprocess.run,
-                        [sys.executable, '-m', 'venv', '--clear', env_dir],
-                        check=True,
-                        capture_output=True,
-                        text=True
-                    )
+                    env_python = await create_venv(env_dir, requirements_path)
 
-                    if os.name == "nt":
-                        env_python = os.path.join(env_dir, "Scripts", "python.exe")
-                    else:
-                        env_python = os.path.join(env_dir, "bin", "python")
-
-                    if output_scripts.dependencies:
-                        await asyncio.to_thread(
-                            subprocess.run,
-                            [env_python, "-m", "pip", "install", *output_scripts.dependencies],
-                            check=True,
-                            capture_output=True,
-                            text=True
-                        )
-
-                    await asyncio.to_thread(
-                        subprocess.run,
-                        [env_python, train_path, '--input', data_path, '--output', model_path],
-                        text=True,
-                        check=True,
-                        capture_output=True
-                    )
+                    await run_train_script(env_python, train_path, data_path, model_path)
 
                     if not os.path.exists(model_path):
                         raise FileNotFoundError(f"Training script did not produce {model_path}")
 
-                    await self.validate_predict_script(env_python, predict_path, data_path, model_path, dataset_analysis.feature_columns)
+                    await self.validate_predict_script(env_python, predict_path, data_path, model_path, threshold_path)
                     
                     return
             except (subprocess.CalledProcessError, FileNotFoundError, AssertionError) as e:

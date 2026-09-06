@@ -22,6 +22,9 @@ class ClarificationAgent():
     async def request_clarification(self, data: BaseModel, problems: list[str], interaction_id: str | None = None):
         prompt = f"""
         In plain language, ask concise question(s) to clarify ambiguities with the existing data based on its JSON schema and a list of detected problems.
+        If appropriate, recommend choice(s) to the user that is the most fitting for the current setup with brief explanations.
+
+        The JSON schema and detected problems below are internal implementation details for your understanding only — the user never sees them. Never mention field names, schema terms, or the literal wording of a detected problem (e.g. "task_type", "primary_metric", "evaluation_method is unspecified") in the question. Translate each one into the plain-language concept it represents (e.g. ask what kind of prediction they want to make, or how they'd like the model's performance measured) as something a non-technical user would understand.
 
         Existing data:
         {data.model_dump_json(indent=2)}

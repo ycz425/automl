@@ -1,6 +1,6 @@
 from pathlib import Path
-from fastapi import UploadFile
 from typing import Literal
+import pandas as pd
 import shutil
 import os
 import dotenv
@@ -30,21 +30,12 @@ class FileStorage:
         self.runs_directory = self.root_directory / 'runs'
         self.runs_directory.mkdir(parents=True, exist_ok=True)
 
-    async def save_dataset(self, dataset_id: str, file: UploadFile):
-        await file.seek(0)
-
+    async def save_dataset(self, dataset_id: str, df: pd.DataFrame):
         dataset_directory = self.datasets_directory / str(dataset_id)
         dataset_directory.mkdir(parents=True, exist_ok=False)
 
-        suffix = Path(file.filename).suffix.lower()
-        destination = dataset_directory / f'dataset{suffix}'
-
-        with destination.open('wb') as output:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                output.write(chunk)
+        destination = dataset_directory / 'dataset.csv'
+        df.to_csv(destination, index=False)
 
         return destination
 
@@ -56,7 +47,6 @@ class FileStorage:
 
     async def get_dataset_path(self, dataset_id: str):
         dataset_directory = await self.get_dataset_directory(dataset_id)
-        print(dataset_directory)
         dataset_path = list(dataset_directory.glob("dataset.*"))[0]
         return dataset_path.resolve()
 

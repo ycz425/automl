@@ -4,6 +4,7 @@ from app.graph.schemas.data_info import DatasetProfile, DatasetAnalysis, DataSpl
 from app.graph.schemas.plan import Plan
 from app.graph.schemas.experiment import ExperimentImplementation, ExperimentResult, Experiment
 from app.services.tracing import traced_interactions_create
+from app.utils.model_scripts import create_venv
 from langsmith import traceable
 from pydantic import ValidationError
 import tempfile
@@ -12,7 +13,6 @@ from datetime import datetime
 import asyncio
 import json
 import subprocess
-import sys
 import dotenv
 import os
 
@@ -51,6 +51,7 @@ class ExperimentAgent():
             - Make experiment_result.json conform exactly to this JSON schema:
             {json.dumps(ExperimentResult.model_json_schema(), indent=2)}
             - Use exactly the metric names specified by the user request.
+            - If the task is binary classification, tune the decision threshold applied to the predicted probability of the class named in dataset analysis's positive_class field, using only held-out validation data (per fold, then aggregated across folds if cross-validation is used) to optimize the primary metric, and report it as `threshold` in the experiment result. If the primary metric is threshold-invariant (e.g. AUROC/AUC, or any other ranking-based metric unaffected by the decision threshold), tune the threshold to optimize F1 instead. Never tune it using data the model was fit on. Use `threshold: null` if the task is regression or multiclass classification.
             - Produce complete runnable code, not pseudocode.
             - Do not include markdown fences or explanations.
 
@@ -128,6 +129,7 @@ class ExperimentAgent():
                 - For execution failures, repair the Python code.
                 - For result validation failures, repair the code that creates experiment_result.json so it correctly follows the ExperimentResult JSON schema.
                 - For result file not found errors, make sure the result file is created at the correct path: {output_path}.
+                - If the task is binary classification, tune the decision threshold applied to the predicted probability of the class named in dataset analysis's positive_class field, using only held-out validation data (per fold, then aggregated across folds if cross-validation is used) to optimize the primary metric, and report it as `threshold` in the experiment result. If the primary metric is threshold-invariant (e.g. AUROC/AUC, or any other ranking-based metric unaffected by the decision threshold), tune the threshold to optimize F1 instead. Never tune it using data the model was fit on. Use `threshold: null` if the task is regression or multiclass classification.
                 - Do not hide errors or fabricate successful results.
                 - Do not return a patch.
             """
@@ -168,6 +170,7 @@ class ExperimentAgent():
             env_dir = Path(temp_dir) / ".venv"
             code_path = Path(temp_dir) / "code.py"
             output_path = Path(temp_dir) / "experiment_result.json"
+            requirements_path = Path(temp_dir) / "requirements.txt"
 
             implementation = await self.generate_implementation(data_path, split_path, user_request, dataset_profile, dataset_analysis, plan, output_path)
 
@@ -177,27 +180,10 @@ class ExperimentAgent():
                 try:
                     output_path.unlink(missing_ok=True)
 
-                    await asyncio.to_thread(
-                        subprocess.run,
-                        [sys.executable, "-m", "venv", "--clear", str(env_dir)],
-                        check=True,
-                        capture_output=True,
-                        text=True
-                    )
+                    with open(str(requirements_path), 'w') as f:
+                        f.write('\n'.join(implementation.dependencies))
 
-                    if os.name == "nt":
-                        env_python = env_dir / "Scripts" / "python.exe"
-                    else:
-                        env_python = env_dir / "bin" / "python"
-
-                    if implementation.dependencies:
-                        await asyncio.to_thread(
-                            subprocess.run,
-                            [str(env_python), "-m", "pip", "install", *implementation.dependencies],
-                            capture_output=True,
-                            check=True,
-                            text=True
-                        )
+                    env_python = await create_venv(str(env_dir), str(requirements_path))
 
                     with open(str(code_path), 'w') as f:
                         f.write(implementation.code)

@@ -53,10 +53,13 @@ export type AutoMLResponse = {
   artifacts?: Artifact[];
 };
 
+// value/threshold can come back null — Evidently may not compute a value
+// for a column at all (e.g. a dtype mismatch between reference and current
+// data for that column).
 export type DriftColumnScore = {
   method: string;
-  value: number;
-  threshold: number;
+  value: number | null;
+  threshold: number | null;
   drifted: boolean;
 };
 
@@ -75,6 +78,21 @@ export type PredictionLogEntry = {
 
 export type PredictionMetricsResponse = {
   history: PredictionLogEntry[];
+};
+
+export type RetrainLabelResponse = {
+  dataset_id: string;
+};
+
+// Metric name -> value, e.g. { accuracy: 0.91, precision: 0.88, ... } or
+// { rmse: 1.2, mae: 0.9, r2: 0.8 } — the fixed set depends on task type and
+// is decided server-side, so the frontend treats it as an open record.
+export type RetrainMetrics = Record<string, number>;
+
+export type RetrainEvaluateResponse = {
+  champion: RetrainMetrics;
+  challenger: RetrainMetrics;
+  challenger_threshold: number | null;
 };
 
 export const PIPELINE_NODES: AutoMLNode[] = [

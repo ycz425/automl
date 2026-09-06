@@ -11,7 +11,7 @@ import {
   startAutoML,
   uploadDataset,
 } from "../api/automlApi";
-import type { AutoMLNode, AutoMLResponse, PredictionLogEntry } from "../types/automl";
+import type { Artifact, AutoMLNode, AutoMLResponse, PredictionLogEntry } from "../types/automl";
 import type { ChatMessage, RunState } from "../types/chat";
 import { toFriendlyMessage } from "../utils/errors";
 import { generateId } from "../utils/files";
@@ -79,8 +79,9 @@ function createWelcomeMessage(): ChatMessage {
       "Welcome! I can help you build a machine learning pipeline from a dataset.\n\n" +
       "To get started:\n\n" +
       "1. Attach a CSV file using the paperclip button below.\n" +
-      "2. Describe the target column and the ML task you want to solve (e.g. classification, regression, forecasting).\n" +
-      "3. Mention any constraints or preferred metrics, such as accuracy, latency, or interpretability.\n\n" +
+      "2. Describe the target column and the ML task — binary classification, multiclass classification, or regression.\n" +
+      "3. Say how you'd like the model evaluated (e.g. an 80/20 train/validation split, or 5-fold cross-validation) and which metric matters most (e.g. accuracy, F1, RMSE).\n" +
+      "4. Optionally, mention any grouping that must stay together across splits (e.g. patient or subject ID), features to include or exclude, or other constraints.\n\n" +
       "Once you send your request, I'll analyze the data, design an approach, and run the experiments.",
   };
 }
@@ -95,6 +96,8 @@ export function useAutoMLChat() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPredicting, setIsPredicting] = useState(false);
   const [predictionHistory, setPredictionHistory] = useState<PredictionLogEntry[]>([]);
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [isLoadingArtifacts, setIsLoadingArtifacts] = useState(false);
 
   const { connect, close } = useAutoMLStream();
   const progressMessageIdRef = useRef<string | null>(null);
@@ -120,9 +123,11 @@ export function useAutoMLChat() {
   }, []);
 
   const updateMessage = useCallback(
-    (id: string, patch: Partial<ChatMessage>) => {
+    (id: string, patch: Partial<ChatMessage> | ((prev: ChatMessage) => Partial<ChatMessage>)) => {
       setMessages((prev) =>
-        prev.map((m) => (m.id === id ? { ...m, ...patch } : m))
+        prev.map((m) =>
+          m.id === id ? { ...m, ...(typeof patch === "function" ? patch(m) : patch) } : m
+        )
       );
     },
     []
@@ -131,9 +136,18 @@ export function useAutoMLChat() {
   const connectStream = useCallback(
     (activeThreadId: string) => {
       connect(activeThreadId, {
-        onStatus: (data: AutoMLResponse) => handleStreamStatus(activeThreadId, data),
+        onStatus: (data: AutoMLResponse) => handleStreamStatus(data),
         onConnectionError: (message: string) => {
-          progressMessageIdRef.current = null;
+          // Without this, whichever stage was active keeps spinning forever
+          // even though the run just failed and an error bubble is about to
+          // appear right below it.
+          if (progressMessageIdRef.current) {
+            updateMessage(progressMessageIdRef.current, {
+              progressStatus: "failed",
+              content: "This stage did not complete.",
+            });
+            progressMessageIdRef.current = null;
+          }
           addMessage({
             id: generateId(),
             role: "assistant",
@@ -149,7 +163,7 @@ export function useAutoMLChat() {
     [connect, addMessage]
   );
 
-  function handleStreamStatus(activeThreadId: string, data: AutoMLResponse) {
+  function handleStreamStatus(data: AutoMLResponse) {
     if (data.status === "running") {
       setRunState("running");
 
@@ -158,21 +172,25 @@ export function useAutoMLChat() {
       if (data.node === "plan_agent" && previousRunningNodeRef.current !== "plan_agent") {
         iterationRef.current += 1;
       }
+
+      const isNewStage = data.node !== previousRunningNodeRef.current;
       previousRunningNodeRef.current = data.node;
 
       // "running" updates don't reliably carry a message — the node label
-      // and pipeline stepper already convey progress, so an empty detail
-      // line is fine (ChatMessageBubble hides it when blank).
+      // already conveys progress, so an empty detail line is fine
+      // (ChatMessageBubble hides it when blank).
       const runningContent = data.message ?? "";
 
-      const existingId = progressMessageIdRef.current;
-      if (existingId) {
-        updateMessage(existingId, {
-          content: runningContent,
-          node: data.node,
-          iteration: iterationRef.current,
-        });
-      } else {
+      if (isNewStage) {
+        // A new stage starts its own message, and the previous stage's
+        // message (if any) is marked done rather than reused or removed —
+        // the chat transcript reads as a persistent record of every stage
+        // the run went through, not a single bubble that mutates in place.
+        // Reaching a genuinely new stage means the previous one passed, so
+        // "done" (a checkmark) is accurate here specifically.
+        if (progressMessageIdRef.current) {
+          updateMessage(progressMessageIdRef.current, { progressStatus: "done" });
+        }
         const id = generateId();
         progressMessageIdRef.current = id;
         addMessage({
@@ -183,7 +201,10 @@ export function useAutoMLChat() {
           content: runningContent,
           node: data.node,
           iteration: iterationRef.current,
+          progressStatus: "active",
         });
+      } else if (progressMessageIdRef.current) {
+        updateMessage(progressMessageIdRef.current, { content: runningContent });
       }
       return;
     }
@@ -191,7 +212,16 @@ export function useAutoMLChat() {
     if (data.status === "need_clarification") {
       clarificationNodeRef.current = data.node;
       if (progressMessageIdRef.current) {
-        removeMessage(progressMessageIdRef.current);
+        // This stage didn't pass — it paused pending input — so it gets a
+        // distinct "clarifying" marker, not the same checkmark as a stage
+        // the run moved past on its own. Its content also needs replacing:
+        // otherwise it's left showing whatever transient status text
+        // ("Parsing request...") was there right before the pause, which
+        // reads oddly next to the "clarifying" icon.
+        updateMessage(progressMessageIdRef.current, {
+          progressStatus: "clarifying",
+          content: "Waiting for your input to continue.",
+        });
         progressMessageIdRef.current = null;
       }
       const clarificationContent =
@@ -222,42 +252,32 @@ export function useAutoMLChat() {
 
     if (data.status === "completed") {
       if (progressMessageIdRef.current) {
-        removeMessage(progressMessageIdRef.current);
+        updateMessage(progressMessageIdRef.current, { progressStatus: "done" });
         progressMessageIdRef.current = null;
       }
-      const resultId = generateId();
       addMessage({
-        id: resultId,
+        id: generateId(),
         role: "assistant",
         kind: "result",
         createdAt: new Date().toISOString(),
         // message is the summary of the experimentation process.
         content: data.message ?? "Your AutoML run has completed.",
         node: data.node,
-        artifacts: data.artifacts,
       });
       setRunState("completed");
-
-      // The SSE payload's artifacts field is only a hint (the backend may
-      // omit it); the artifact endpoint is the source of truth for what's
-      // actually downloadable. It returns bare filenames, not Artifact
-      // objects, so there's no label metadata to carry over.
-      getArtifacts(activeThreadId)
-        .then((response) => {
-          updateMessage(resultId, {
-            artifacts: response.artifacts.map((filename) => ({ filename })),
-          });
-        })
-        .catch(() => {
-          // Non-fatal: the run itself already succeeded. Fall back to
-          // whatever (if anything) the SSE payload provided.
-        });
       return;
     }
 
     if (data.status === "failed") {
       if (progressMessageIdRef.current) {
-        removeMessage(progressMessageIdRef.current);
+        // The stage in progress when the run failed didn't pass either —
+        // it gets the same non-checkmark treatment as a clarification pause,
+        // and its stale running-status text is replaced for the same reason.
+        // The actual failure reason goes in the separate error bubble below.
+        updateMessage(progressMessageIdRef.current, {
+          progressStatus: "failed",
+          content: "This stage did not complete.",
+        });
         progressMessageIdRef.current = null;
       }
       addMessage({
@@ -312,11 +332,15 @@ export function useAutoMLChat() {
         setThreadId(startResult.thread_id);
         setRunState("running");
 
-        // prompt_agent always runs first, so the pipeline indicator can
-        // highlight it immediately instead of showing no active stage until
-        // the first "running" event arrives.
+        // prompt_agent always runs first, so seed its bubble immediately
+        // instead of showing nothing until the first "running" event
+        // arrives. previousRunningNodeRef must be set to match — otherwise
+        // handleStreamStatus sees that first real "running" event as a node
+        // change from its initial undefined value and creates a duplicate
+        // bubble instead of updating this one in place.
         const progressId = generateId();
         progressMessageIdRef.current = progressId;
+        previousRunningNodeRef.current = "prompt_agent";
         addMessage({
           id: progressId,
           role: "assistant",
@@ -324,6 +348,7 @@ export function useAutoMLChat() {
           createdAt: new Date().toISOString(),
           content: "Getting started...",
           node: "prompt_agent",
+          progressStatus: "active",
         });
 
         connectStream(startResult.thread_id);
@@ -386,6 +411,7 @@ export function useAutoMLChat() {
           createdAt: new Date().toISOString(),
           content: "Resuming...",
           node: clarificationNodeRef.current,
+          progressStatus: "active",
         });
       } catch (error) {
         if (controller.signal.aborted) return;
@@ -418,6 +444,23 @@ export function useAutoMLChat() {
     }
   }, []);
 
+  // Fetched on demand (not cached from the run's "completed" event) since
+  // the artifact set changes after retraining/promotion — the download menu
+  // should always reflect what's on disk right now, not what existed when
+  // the run first finished.
+  const refreshArtifacts = useCallback(async () => {
+    if (!threadId) return;
+    setIsLoadingArtifacts(true);
+    try {
+      const response = await getArtifacts(threadId);
+      setArtifacts(response.artifacts.map((filename) => ({ filename })));
+    } catch {
+      setArtifacts([]);
+    } finally {
+      setIsLoadingArtifacts(false);
+    }
+  }, [threadId]);
+
   const runPrediction = useCallback(
     async (file: File) => {
       if (isPredicting || !threadId) return;
@@ -437,7 +480,7 @@ export function useAutoMLChat() {
         role: "assistant",
         kind: "progress",
         createdAt: new Date().toISOString(),
-        content: "Generating predictions — this may take a moment, especially on the first run.",
+        content: "Generating predictions — this may take a moment.",
       });
 
       setSelectedFile(null);
@@ -515,6 +558,7 @@ export function useAutoMLChat() {
     setErrorMessage(null);
     setIsSubmitting(false);
     setPredictionHistory([]);
+    setArtifacts([]);
     setRunState("idle");
   }, [close, threadId, datasetId]);
 
@@ -649,6 +693,8 @@ export function useAutoMLChat() {
     isSubmitting,
     isPredicting,
     predictionHistory,
+    artifacts,
+    isLoadingArtifacts,
     isComposerEnabled,
     canAttachFile,
     isPredictMode,
@@ -660,6 +706,9 @@ export function useAutoMLChat() {
     runPrediction,
     resetSession,
     getDownloadUrl,
+    refreshArtifacts,
     setErrorMessage,
+    addMessage,
+    updateMessage,
   };
 }

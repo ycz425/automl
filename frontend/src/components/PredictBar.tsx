@@ -10,6 +10,7 @@ type PredictBarProps = {
   predictionHistory: PredictionLogEntry[];
   onPredict: (file: File) => void;
   onInvalidFile: (message: string) => void;
+  onOpenRetrain: () => void;
 };
 
 export function PredictBar({
@@ -17,6 +18,7 @@ export function PredictBar({
   predictionHistory,
   onPredict,
   onInvalidFile,
+  onOpenRetrain,
 }: PredictBarProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -36,7 +38,7 @@ export function PredictBar({
   return (
     <div className="border-t border-neutral-800 bg-neutral-950/95 backdrop-blur">
       <div className="mx-auto w-full max-w-3xl">
-        <PredictionMonitorDashboard history={predictionHistory} />
+        <PredictionMonitorDashboard history={predictionHistory} onOpenRetrain={onOpenRetrain} />
 
         <div className="flex flex-col gap-2 px-4 py-4">
           <label htmlFor="predict-upload-input" className="sr-only">

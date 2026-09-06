@@ -1,9 +1,16 @@
 import { RotateCcw, Workflow } from "lucide-react";
+import type { Artifact } from "../types/automl";
 import type { RunState } from "../types/chat";
+import { ArtifactsMenu } from "./ArtifactsMenu";
 
 type ChatHeaderProps = {
   runState: RunState;
   onClearSession: () => void;
+  isArtifactsAvailable: boolean;
+  artifacts: Artifact[];
+  isLoadingArtifacts: boolean;
+  getDownloadUrl: (filename: string) => string;
+  onOpenArtifacts: () => void;
 };
 
 const STATUS_CONFIG: Record<RunState, { label: string; dotClassName: string }> = {
@@ -17,7 +24,15 @@ const STATUS_CONFIG: Record<RunState, { label: string; dotClassName: string }> =
   failed: { label: "Failed", dotClassName: "bg-red-400" },
 };
 
-export function ChatHeader({ runState, onClearSession }: ChatHeaderProps) {
+export function ChatHeader({
+  runState,
+  onClearSession,
+  isArtifactsAvailable,
+  artifacts,
+  isLoadingArtifacts,
+  getDownloadUrl,
+  onOpenArtifacts,
+}: ChatHeaderProps) {
   const status = STATUS_CONFIG[runState];
 
   return (
@@ -39,15 +54,24 @@ export function ChatHeader({ runState, onClearSession }: ChatHeaderProps) {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={onClearSession}
-          className="flex items-center gap-1.5 rounded-md border border-neutral-800 px-2.5 py-1.5 text-xs font-medium text-neutral-400 transition-colors hover:border-neutral-600 hover:text-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-400"
-          aria-label="Clear session and start over"
-        >
-          <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-          Clear session
-        </button>
+        <div className="flex items-center gap-2">
+          <ArtifactsMenu
+            isAvailable={isArtifactsAvailable}
+            artifacts={artifacts}
+            isLoading={isLoadingArtifacts}
+            getDownloadUrl={getDownloadUrl}
+            onOpen={onOpenArtifacts}
+          />
+          <button
+            type="button"
+            onClick={onClearSession}
+            className="flex items-center gap-1.5 rounded-md border border-neutral-800 px-2.5 py-1.5 text-xs font-medium text-neutral-400 transition-colors hover:border-neutral-600 hover:text-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-400"
+            aria-label="Clear session and start over"
+          >
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+            Clear session
+          </button>
+        </div>
       </div>
     </header>
   );

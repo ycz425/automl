@@ -15,7 +15,7 @@ class FoldMetrics(BaseModel):
 class ExperimentResult(BaseModel):
     metrics: list[MetricEntry] = Field(default_factory=list, description="Overall evaluation metrics for the experiment. For cross-validation, these should typically be the metrics aggregated across all folds (for example, the mean metric values). For a single train/validation/test split, these are the final metrics for that experiment.")
     fold_metrics: list[FoldMetrics] | None = Field(default=None, description="Per-fold evaluation metrics when cross-validation is used. Use null if the experiment does not perform cross-validation.")
-
+    threshold: float | None = Field(default=None, description="Decision threshold applied to the predicted probability of the class named in dataset analysis's positive_class field, to produce the final class label, tuned using only held-out validation data (per fold, then aggregated across folds when cross-validation is used) to optimize the user request's primary metric. Use null when the task is regression or multiclass classification, since no single binary threshold applies to either.")
 
 class ExperimentImplementation(BaseModel):
     code: str = Field(description="Complete executable Python source code implementing the machine-learning experiment.")

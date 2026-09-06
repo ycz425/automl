@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from typing import Literal
 import asyncio
 from google.cloud import firestore
@@ -33,7 +32,7 @@ class StatusStore:
         self.async_collection = self.async_client.collection('runs')
         self.sync_collection = self.sync_client.collection('runs')
 
-    async def update(self, thread_id: str, status: automl_status | None = None, node: automl_node | None = None, message: str | None = None):
+    async def update(self, thread_id: str, status: automl_status |  None = None, node: automl_node | None = None, message: str | None = None):
         document = self.async_collection.document(thread_id)
         snapshot = await document.get()
 

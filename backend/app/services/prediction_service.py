@@ -1,101 +1,65 @@
-from fastapi import UploadFile
 from app.services.file_storage import FileStorage
+from app.utils.model_scripts import create_venv, run_predict_script
 from evidently import Report
 from evidently.presets import DataDriftPreset
 from datetime import datetime, timezone
-from pathlib import Path
+from app.graph.schemas.data_info import DatasetAnalysis
 import pandas as pd
 import tempfile
-import asyncio
-import subprocess
-import sys
 import json
 import os
-import io
 
 class PredictionService:
-    def __init__(self, file_storage: FileStorage = FileStorage(), drift_window: int = 1000, drift_floor: int = 100):
+    def __init__(self, file_storage: FileStorage, drift_window: int = 1000, drift_floor: int = 100):
         self.file_storage = file_storage
         self.drift_window = drift_window
         self.drift_floor = drift_floor
 
 
-    async def predict(self, file: UploadFile, thread_id: str):
-        await file.seek(0)
-
+    async def predict(self, df: pd.DataFrame, thread_id: str):
         artifacts_dir = await self.file_storage.get_run_directory(thread_id)
         model_path = str(artifacts_dir / 'model.joblib')
         script_path = str(artifacts_dir / 'predict.py')
         requirements_path = str(artifacts_dir / 'requirements.txt')
-    
-        if not os.path.exists(model_path) or not os.path.exists(script_path) or not os.path.exists(requirements_path):
+        threshold_path = str(artifacts_dir / 'threshold.json')
+
+        if not os.path.exists(model_path) or not os.path.exists(script_path) or not os.path.exists(requirements_path) or not os.path.exists(threshold_path):
             raise ArtifactNotFoundError
 
         with tempfile.TemporaryDirectory() as temp_dir:
             input_path = os.path.join(temp_dir, 'input.csv')
             env_dir = os.path.join(temp_dir, '.venv')
             output_path = os.path.join(temp_dir, 'output.csv')
-    
-            with open(input_path, 'wb') as f:
-                while True:
-                    chunk = await file.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-    
-            if os.name == "nt":
-                env_python = os.path.join(env_dir, "Scripts", "python.exe")
-            else:
-                env_python = os.path.join(env_dir, "bin", "python")
-    
-            await asyncio.to_thread(
-                subprocess.run,
-                [sys.executable, '-m', 'venv', '--clear', env_dir],
-                check=True,
-                capture_output=True,
-                text=True
-            )
 
-            await asyncio.to_thread(
-                subprocess.run,
-                [env_python, "-m", "pip", "install", "-r", requirements_path],
-                check=True,
-                capture_output=True,
-                text=True
-            )
+            df.to_csv(input_path, index=False)
 
-            await asyncio.to_thread(
-                subprocess.run,
-                [env_python, script_path, '--model', model_path, '--input', input_path, '--output', output_path],
-                check=True,
-                capture_output=True,
-                text=True
-            )
+            env_python = await create_venv(env_dir, requirements_path)
+
+            await run_predict_script(env_python, script_path, model_path, input_path, output_path, threshold_path)
 
             output_df = pd.read_csv(output_path)
 
         return output_df
 
-    async def record_data(self, file: UploadFile, thread_id: str):
-        await file.seek(0)
-
+    async def record_data(self, data: pd.DataFrame, thread_id: str):
         artifacts_dir = await self.file_storage.get_run_directory(thread_id)
         reference_data_path = artifacts_dir / 'reference_data.csv'
+        dataset_analysis_path = artifacts_dir / 'dataset_analysis.json'
         data_record_path = artifacts_dir / 'data_record.csv'
-        
-        if not reference_data_path.exists():
+
+        if not reference_data_path.exists() or not dataset_analysis_path.exists():
             raise ArtifactNotFoundError
 
-        raw = b""
-        while True:
-            chunk = await file.read(1024 * 1024)
-            if not chunk:
-                break
-            raw += chunk
-        data = pd.read_csv(io.BytesIO(raw))
+        dataset_analysis = DatasetAnalysis.model_validate_json(dataset_analysis_path.read_text())
 
         reference_data = pd.read_csv(str(reference_data_path))
-        columns = reference_data.columns
+
+        group_columns = (
+            [dataset_analysis.group_column]
+            if dataset_analysis.group_column and dataset_analysis.group_column in data.columns
+            else []
+        )
+        columns = list(set(dataset_analysis.feature_columns + group_columns))
 
         if data_record_path.exists():
             existing = pd.read_csv(str(data_record_path))
@@ -103,6 +67,21 @@ class PredictionService:
             existing = pd.DataFrame(columns=columns)
 
         data_record = pd.concat([existing, data[columns]], ignore_index=True).tail(self.drift_window)
+
+        # CSV has no dtype of its own — pandas re-infers it from scratch on
+        # every read, so a single stray non-numeric value anywhere in the
+        # rolling window can silently downgrade a whole numeric column to
+        # 'object' for as long as that row stays in the window. Realigning
+        # to reference_data's dtypes before writing keeps data_record.csv
+        # (and every future read of it) consistent, instead of relying on
+        # Evidently's best-effort dtype coercion at drift-computation time.
+        for column in columns:
+            if column in reference_data.columns:
+                try:
+                    data_record[column] = data_record[column].astype(reference_data[column].dtype)
+                except (ValueError, TypeError):
+                    pass
+
         data_record.to_csv(str(data_record_path), index=False)
 
         if len(data_record) < self.drift_floor:
