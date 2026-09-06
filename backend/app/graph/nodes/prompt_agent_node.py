@@ -1,11 +1,11 @@
 from app.graph.schemas.state import AutoMLState
 from app.agents.prompt_agent import PromptAgent
 from langgraph.runtime import Runtime
-from app.graph.context import AutoMLContext
+from app.graph.context import AutoMLContext, report_status
 from datetime import datetime
 
 async def prompt_status_update_node(state: AutoMLState, runtime: Runtime[AutoMLContext]):
-    await runtime.context.status_store.update(runtime.execution_info.thread_id, status='running', node='prompt_agent', message="Parsing request...")
+    await report_status(runtime, status='running', node='prompt_agent', message="Parsing request...")
     return {}
 
 

@@ -9,9 +9,9 @@ import {
   promoteChallenger,
 } from "../api/automlApi";
 import type { ChatMessage } from "../types/chat";
+import { errorMessage, progressMessage, retrainResultMessage } from "../utils/chatMessages";
 import { parseCsv, type ParsedCsv } from "../utils/csv";
 import { toFriendlyMessage } from "../utils/errors";
-import { generateId } from "../utils/files";
 
 export type RetrainStage = "closed" | "labeling";
 
@@ -71,43 +71,28 @@ export function useRetrain(threadId: string | null, addMessage: AddMessage, upda
       setIsSubmittingLabels(true);
       close();
 
-      const progressId = generateId();
-      addMessage({
-        id: progressId,
-        role: "assistant",
-        kind: "progress",
-        createdAt: new Date().toISOString(),
+      const progressMsg = progressMessage({
         content: "Training and evaluating a challenger model on the labeled data — this can take a few minutes.",
         label: "Retraining",
-        progressStatus: "active",
       });
+      const progressId = progressMsg.id;
+      addMessage(progressMsg);
 
       try {
         const labelResponse = await labelRetrainData(threadId, file);
         const result = await evaluateRetrain(threadId, labelResponse.dataset_id);
         updateMessage(progressId, { progressStatus: "done", content: "" });
-        addMessage({
-          id: generateId(),
-          role: "assistant",
-          kind: "retrain_result",
-          createdAt: new Date().toISOString(),
-          content: "",
-          retrainResult: {
+        addMessage(
+          retrainResultMessage({
             datasetId: labelResponse.dataset_id,
             champion: result.champion,
             challenger: result.challenger,
             challengerThreshold: result.challenger_threshold,
-          },
-        });
+          })
+        );
       } catch (err) {
         updateMessage(progressId, { progressStatus: "failed", content: "Retraining failed." });
-        addMessage({
-          id: generateId(),
-          role: "assistant",
-          kind: "error",
-          createdAt: new Date().toISOString(),
-          content: toFriendlyMessage(err, "Failed to train and evaluate the new model."),
-        });
+        addMessage(errorMessage(toFriendlyMessage(err, "Failed to train and evaluate the new model.")));
       } finally {
         setIsSubmittingLabels(false);
       }
@@ -133,17 +118,13 @@ export function useRetrain(threadId: string | null, addMessage: AddMessage, upda
       if (!threadId) return;
       setIsResolving(true);
 
-      const progressId = generateId();
-      addMessage({
-        id: progressId,
-        role: "assistant",
-        kind: "progress",
-        createdAt: new Date().toISOString(),
+      const progressMsg = progressMessage({
         content:
           "Retraining the final model on the full labeled dataset and deploying it — this can take a few minutes.",
         label: "Promoting new model",
-        progressStatus: "active",
       });
+      const progressId = progressMsg.id;
+      addMessage(progressMsg);
 
       try {
         await promoteChallenger(threadId, datasetId);
@@ -155,13 +136,7 @@ export function useRetrain(threadId: string | null, addMessage: AddMessage, upda
         );
       } catch (err) {
         updateMessage(progressId, { progressStatus: "failed", content: "Promotion failed." });
-        addMessage({
-          id: generateId(),
-          role: "assistant",
-          kind: "error",
-          createdAt: new Date().toISOString(),
-          content: toFriendlyMessage(err, "Failed to promote the new model."),
-        });
+        addMessage(errorMessage(toFriendlyMessage(err, "Failed to promote the new model.")));
       } finally {
         setIsResolving(false);
       }
@@ -181,13 +156,7 @@ export function useRetrain(threadId: string | null, addMessage: AddMessage, upda
             : {}
         );
       } catch (err) {
-        addMessage({
-          id: generateId(),
-          role: "assistant",
-          kind: "error",
-          createdAt: new Date().toISOString(),
-          content: toFriendlyMessage(err, "Failed to discard the comparison."),
-        });
+        addMessage(errorMessage(toFriendlyMessage(err, "Failed to discard the comparison.")));
       } finally {
         setIsResolving(false);
       }

@@ -1,10 +1,9 @@
-from google import genai
+from app.agents.base import LLMAgent
 from app.graph.schemas.user_request import UserRequest
 from app.graph.schemas.data_info import DatasetProfile, DatasetAnalysis, DataSplits
 from app.graph.schemas.plan import Plan
 from app.graph.schemas.experiment import ExperimentImplementation, ExperimentResult, Experiment
-from app.services.tracing import traced_interactions_create
-from app.utils.model_scripts import create_venv
+from app.utils.model_scripts import create_venv, format_subprocess_error
 from langsmith import traceable
 from pydantic import ValidationError
 import tempfile
@@ -13,157 +12,90 @@ from datetime import datetime
 import asyncio
 import json
 import subprocess
-import dotenv
-import os
-
-dotenv.load_dotenv()
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
 
-class ExperimentAgent():
-    def __init__(self, model = "gemini-3.1-flash-lite", verbose=False):
-            self.client = genai.Client(api_key=GEMINI_API_KEY)
-            self.model = model
-            self.verbose = verbose
-
+class ExperimentAgent(LLMAgent):
     @traceable(name="ExperimentAgent.generate_implementation")
     async def generate_implementation(self, data_path: str, split_path: str, user_request: UserRequest, dataset_profile: DatasetProfile, dataset_analysis: DatasetAnalysis, plan: Plan, output_path: str, max_retries=5):
         if self.verbose:
             print(f'{datetime.now()}     generating experiment implementation...')
 
-        validation_error = None
-        for attempt in range(max_retries + 1):
-            prompt = f"""
-            Generate executable Python code for the machine-learning experiment below.
+        prompt = f"""
+        Generate executable Python code for the machine-learning experiment below.
 
-            Requirements:
-            - Follow the experiment plan exactly.
-            - Use only columns listed in the dataset analysis.
-            - Do not invent column names.
-            - Handle missing values and feature types described in the dataset profile.
-            - Read the dataset from: {data_path}
-            - Read the split indices from {split_path}
-            - Expect split indices to follow this JSON schema:
-            {json.dumps(DataSplits.model_json_schema(), indent=2)}
-            - Do not generate a new dataset split and only use the given split indices.
-            - Save the final experiment result to:
-                {output_path}
-            - Make experiment_result.json conform exactly to this JSON schema:
-            {json.dumps(ExperimentResult.model_json_schema(), indent=2)}
-            - Use exactly the metric names specified by the user request.
-            - If the task is binary classification, tune the decision threshold applied to the predicted probability of the class named in dataset analysis's positive_class field, using only held-out validation data (per fold, then aggregated across folds if cross-validation is used) to optimize the primary metric, and report it as `threshold` in the experiment result. If the primary metric is threshold-invariant (e.g. AUROC/AUC, or any other ranking-based metric unaffected by the decision threshold), tune the threshold to optimize F1 instead. Never tune it using data the model was fit on. Use `threshold: null` if the task is regression or multiclass classification.
-            - Produce complete runnable code, not pseudocode.
-            - Do not include markdown fences or explanations.
+        Requirements:
+        - Follow the experiment plan exactly.
+        - Use only columns listed in the dataset analysis.
+        - Do not invent column names.
+        - Handle missing values and feature types described in the dataset profile.
+        - Read the dataset from: {data_path}
+        - Read the split indices from {split_path}
+        - Expect split indices to follow this JSON schema:
+        {json.dumps(DataSplits.model_json_schema(), indent=2)}
+        - Do not generate a new dataset split and only use the given split indices.
+        - Save the final experiment result to:
+            {output_path}
+        - Make experiment_result.json conform exactly to this JSON schema:
+        {json.dumps(ExperimentResult.model_json_schema(), indent=2)}
+        - Use exactly the metric names specified by the user request.
+        - If the task is binary classification, tune the decision threshold applied to the predicted probability of the class named in dataset analysis's positive_class field, using only held-out validation data (per fold, then aggregated across folds if cross-validation is used) to optimize the primary metric, and report it as `threshold` in the experiment result. If the primary metric is threshold-invariant (e.g. AUROC/AUC, or any other ranking-based metric unaffected by the decision threshold), tune the threshold to optimize F1 instead. Never tune it using data the model was fit on. Use `threshold: null` if the task is regression or multiclass classification.
+        - Produce complete runnable code, not pseudocode.
+        - Do not include markdown fences or explanations.
 
-            User request:
-            {user_request.model_dump_json(indent=2)}
+        User request:
+        {user_request.model_dump_json(indent=2)}
 
-            Dataset profile:
-            {dataset_profile.model_dump_json(indent=2)}
+        Dataset profile:
+        {dataset_profile.model_dump_json(indent=2)}
 
-            Dataset analysis:
-            {dataset_analysis.model_dump_json(indent=2)}
+        Dataset analysis:
+        {dataset_analysis.model_dump_json(indent=2)}
 
-            Experiment plan:
-            {plan.model_dump_json(indent=2)}
-            """
-            
-            if validation_error:
-                prompt += (
-                    "\n\nYour previous output failed schema validation:\n\n"
-                    f"{validation_error}\n\n"
-                    "Return a corrected response that strictly matches the required schema.\n"
-                )
+        Experiment plan:
+        {plan.model_dump_json(indent=2)}
+        """
 
-            interaction = await traced_interactions_create(
-                self.client,
-                model=self.model,
-                input=prompt,
-                generation_config={
-                    'thinking_level': 'low',
-                    'temperature': 0
-                },
-                response_format={
-                    'mime_type': 'application/json',
-                    'schema': ExperimentImplementation.model_json_schema()
-                }
-            )
+        return await self.generate_structured(
+            prompt, ExperimentImplementation, max_retries=max_retries, label="ExperimentImplementation"
+        )
 
-            try:
-                return ExperimentImplementation.model_validate_json(interaction.output_text)
-            except ValidationError as e:
-                if attempt == max_retries:
-                    raise
-                validation_error = str(e)
-                if self.verbose:
-                    print(f'{datetime.now()}     ExperimentImplementation model validation failed - retrying... (attempt: {attempt + 1}/{max_retries})')
-
-    
     @traceable(name="ExperimentAgent.repair_implementation")
     async def repair_implementation(self, implementation: ExperimentImplementation, error_message: str, plan: Plan, output_path: str, max_retries=5):
         if self.verbose:
             print(f'{datetime.now()}     repairing experiment implementation...')
-        
-        validation_error = None
-        for attempt in range(max_retries + 1):
-            prompt = f"""
-                Repair the previous ExperimentImplementation.
 
-                Failure details:
-                {error_message}
+        prompt = f"""
+            Repair the previous ExperimentImplementation.
 
-                Previous implementation:
-                {implementation.model_dump_json(indent=2)}
+            Failure details:
+            {error_message}
 
-                Plan:
-                {plan.model_dump_json(indent=2)}
+            Previous implementation:
+            {implementation.model_dump_json(indent=2)}
 
-                ExperimentResult JSON schema:
-                {json.dumps(ExperimentResult.model_json_schema(), indent=2)}
+            Plan:
+            {plan.model_dump_json(indent=2)}
 
-                Return the complete corrected ExperimentImplementation.
+            ExperimentResult JSON schema:
+            {json.dumps(ExperimentResult.model_json_schema(), indent=2)}
 
-                Rules:
-                - Preserve the experiment plan.
-                - For dependency failures, correct the dependencies or replace the incompatible library with an equivalent supported approach.
-                - For execution failures, repair the Python code.
-                - For result validation failures, repair the code that creates experiment_result.json so it correctly follows the ExperimentResult JSON schema.
-                - For result file not found errors, make sure the result file is created at the correct path: {output_path}.
-                - If the task is binary classification, tune the decision threshold applied to the predicted probability of the class named in dataset analysis's positive_class field, using only held-out validation data (per fold, then aggregated across folds if cross-validation is used) to optimize the primary metric, and report it as `threshold` in the experiment result. If the primary metric is threshold-invariant (e.g. AUROC/AUC, or any other ranking-based metric unaffected by the decision threshold), tune the threshold to optimize F1 instead. Never tune it using data the model was fit on. Use `threshold: null` if the task is regression or multiclass classification.
-                - Do not hide errors or fabricate successful results.
-                - Do not return a patch.
-            """
-            
-            if validation_error:
-                prompt += (
-                    "\n\nYour previous output failed schema validation:\n\n"
-                    f"{validation_error}\n\n"
-                    "Return a corrected response that strictly matches the required schema.\n"
-                )
+            Return the complete corrected ExperimentImplementation.
 
-            interaction = await traced_interactions_create(
-                self.client,
-                model=self.model,
-                input=prompt,
-                generation_config={
-                    'thinking_level': 'low',
-                    'temperature': 0
-                },
-                response_format={
-                    'mime_type': 'application/json',
-                    'schema': ExperimentImplementation.model_json_schema()
-                }
-            )
+            Rules:
+            - Preserve the experiment plan.
+            - For dependency failures, correct the dependencies or replace the incompatible library with an equivalent supported approach.
+            - For execution failures, repair the Python code.
+            - For result validation failures, repair the code that creates experiment_result.json so it correctly follows the ExperimentResult JSON schema.
+            - For result file not found errors, make sure the result file is created at the correct path: {output_path}.
+            - If the task is binary classification, tune the decision threshold applied to the predicted probability of the class named in dataset analysis's positive_class field, using only held-out validation data (per fold, then aggregated across folds if cross-validation is used) to optimize the primary metric, and report it as `threshold` in the experiment result. If the primary metric is threshold-invariant (e.g. AUROC/AUC, or any other ranking-based metric unaffected by the decision threshold), tune the threshold to optimize F1 instead. Never tune it using data the model was fit on. Use `threshold: null` if the task is regression or multiclass classification.
+            - Do not hide errors or fabricate successful results.
+            - Do not return a patch.
+        """
 
-            try:
-                return ExperimentImplementation.model_validate_json(interaction.output_text)
-            except ValidationError as e:
-                if attempt == max_retries:
-                    raise
-                validation_error = str(e)
-                if self.verbose:
-                    print(f'{datetime.now()}     ExperimentImplementation model validation failed - retrying... (attempt: {attempt + 1}/{max_retries})')
-    
+        return await self.generate_structured(
+            prompt, ExperimentImplementation, max_retries=max_retries, label="ExperimentImplementation"
+        )
+
     @traceable(name="ExperimentAgent.execute_plan")
     async def execute_plan(self, data_path: str, split_path: str, user_request: UserRequest, dataset_profile: DatasetProfile, dataset_analysis: DatasetAnalysis, plan: Plan, max_retries=5):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -206,14 +138,5 @@ class ExperimentAgent():
                         raise
                     if self.verbose:
                         print(f'{datetime.now()}     experiment failed - retrying... (attempt: {attempt + 1}/{max_retries})')
-                    if isinstance(e, subprocess.CalledProcessError):
-                        error_message = (
-                            f"Command failed: {e.cmd}\n"
-                            f"Return code: {e.returncode}\n"
-                            f"STDOUT:\n{e.stdout or ''}\n"
-                            f"STDERR:\n{e.stderr or ''}"
-                        )
-                    else:
-                        error_message = str(e)
+                    error_message = format_subprocess_error(e)
                     implementation = await self.repair_implementation(implementation, error_message, plan, str(output_path))
-    

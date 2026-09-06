@@ -1,26 +1,15 @@
-from google import genai
 import pandas as pd
+from app.agents.base import LLMAgent
 from app.graph.schemas.data_info import DatasetProfile, DatasetAnalysis, ColumnProfile, DataSplits
 from app.graph.schemas.user_request import UserRequest
-from app.services.tracing import traced_interactions_create
 from langsmith import traceable
 from pydantic import ValidationError
 from datetime import datetime
 from sklearn.model_selection import StratifiedGroupKFold, LeaveOneGroupOut, GroupShuffleSplit, GroupKFold
 import numpy as np
-import dotenv
-import os
-
-dotenv.load_dotenv()
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
 
-class DataAgent():
-    def __init__(self, model = "gemini-3.1-flash-lite", verbose=False):
-        self.client = genai.Client(api_key=GEMINI_API_KEY)
-        self.model = model
-        self.verbose = verbose
-
+class DataAgent(LLMAgent):
     def create_split_index(self, df: pd.DataFrame, user_request: UserRequest, dataset_analysis: DatasetAnalysis):
         X = df.drop(columns=dataset_analysis.target_column)
         y = df[dataset_analysis.target_column]
@@ -191,22 +180,14 @@ class DataAgent():
                     "Correct these problems while continuing to strictly follow the schema."
                 )
 
-            interaction = await traced_interactions_create(
-                self.client,
-                model=self.model,
-                input=prompt,
-                generation_config={
-                    'thinking_level': 'low',
-                    'temperature': 0
-                },
-                response_format={
-                    'mime_type': 'application/json',
-                    'schema': DatasetAnalysis.model_json_schema()
-                }
-            )
-
             try:
-                dataset_analysis = DatasetAnalysis.model_validate_json(interaction.output_text)
+                # max_retries=0: a single attempt here — schema-validation
+                # retries and semantic-check retries share this method's own
+                # outer loop and its max_retries budget instead of stacking
+                # a second, independent retry budget on top.
+                dataset_analysis = await self.generate_structured(
+                    prompt, DatasetAnalysis, max_retries=0, label="DatasetAnalysis"
+                )
             except ValidationError as e:
                 if attempt == max_retries:
                     raise

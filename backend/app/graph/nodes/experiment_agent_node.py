@@ -1,12 +1,12 @@
 from app.graph.schemas.state import AutoMLState
 from app.agents.experiment_agent import ExperimentAgent
 from langgraph.runtime import Runtime
-from app.graph.context import AutoMLContext
+from app.graph.context import AutoMLContext, report_status
 from datetime import datetime
 
 
 async def experiment_status_update_node(state: AutoMLState, runtime: Runtime[AutoMLContext]):
-    await runtime.context.status_store.update(runtime.execution_info.thread_id, status='running', node='experiment_agent', message="Running experiment...")
+    await report_status(runtime, status='running', node='experiment_agent', message="Running experiment...")
     return {}
 
 async def experiment_agent_node(state: AutoMLState, runtime: Runtime[AutoMLContext]):

@@ -4,6 +4,17 @@ import sys
 import os
 
 
+def format_subprocess_error(e: Exception) -> str:
+    if isinstance(e, subprocess.CalledProcessError):
+        return (
+            f"Command failed: {e.cmd}\n"
+            f"Return code: {e.returncode}\n"
+            f"STDOUT:\n{e.stdout or ''}\n"
+            f"STDERR:\n{e.stderr or ''}"
+        )
+    return str(e)
+
+
 def _env_python(env_dir: str) -> str:
     if os.name == "nt":
         return os.path.join(env_dir, "Scripts", "python.exe")

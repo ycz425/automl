@@ -3,15 +3,11 @@ from langgraph.types import interrupt
 from datetime import datetime
 from app.agents.clarification_agent import ClarificationAgent
 from langgraph.runtime import Runtime
-from app.graph.context import AutoMLContext
+from app.graph.context import AutoMLContext, report_status
 
 
 async def clarification_status_update_node(state: AutoMLState, runtime: Runtime[AutoMLContext]):
-    await runtime.context.status_store.update(
-        runtime.execution_info.thread_id,
-        status='need_clarification',
-        message=state.clarification_request
-    )
+    await report_status(runtime, status='need_clarification', message=state.clarification_request)
     return {}
 
 

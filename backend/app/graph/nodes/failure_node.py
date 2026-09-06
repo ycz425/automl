@@ -1,6 +1,6 @@
 from app.graph.schemas.state import AutoMLState
 from langgraph.runtime import Runtime
-from app.graph.context import AutoMLContext
+from app.graph.context import AutoMLContext, report_status
 from datetime import datetime
 
 
@@ -11,5 +11,5 @@ async def failure_node(state: AutoMLState, runtime: Runtime[AutoMLContext]):
         'Could not get the information needed to continue: ' + '; '.join(state.problems)
         if state.problems else 'Failed.'
     )
-    await runtime.context.status_store.update(runtime.execution_info.thread_id, status='failed', message=message)
+    await report_status(runtime, status='failed', message=message)
     return {}

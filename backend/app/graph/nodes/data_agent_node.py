@@ -3,11 +3,11 @@ from app.agents.data_agent import DataAgent
 import pandas as pd
 from datetime import datetime
 from langgraph.runtime import Runtime
-from app.graph.context import AutoMLContext
+from app.graph.context import AutoMLContext, report_status
 
 
 async def data_status_update_node(state: AutoMLState, runtime: Runtime[AutoMLContext]):
-    await runtime.context.status_store.update(runtime.execution_info.thread_id, status='running', node='data_agent', message="Analyzing dataset...")
+    await report_status(runtime, status='running', node='data_agent', message="Analyzing dataset...")
     return {}
 
 

@@ -13,8 +13,17 @@ import {
 } from "../api/automlApi";
 import type { Artifact, AutoMLNode, AutoMLResponse, PredictionLogEntry } from "../types/automl";
 import type { ChatMessage, RunState } from "../types/chat";
+import {
+  assistantCsvMessage,
+  assistantTextMessage,
+  clarificationMessage,
+  errorMessage as errorChatMessage,
+  progressMessage,
+  resultMessage,
+  userCsvMessage,
+  userTextMessage,
+} from "../utils/chatMessages";
 import { toFriendlyMessage } from "../utils/errors";
-import { generateId } from "../utils/files";
 import { useAutoMLStream } from "./useAutoMLStream";
 
 const STORAGE_KEY = "automl-agent-session-v1";
@@ -70,20 +79,15 @@ function clearPersistedSession() {
 }
 
 function createWelcomeMessage(): ChatMessage {
-  return {
-    id: generateId(),
-    role: "assistant",
-    kind: "text",
-    createdAt: new Date().toISOString(),
-    content:
-      "Welcome! I can help you build a machine learning pipeline from a dataset.\n\n" +
+  return assistantTextMessage(
+    "Welcome! I can help you build a machine learning pipeline from a dataset.\n\n" +
       "To get started:\n\n" +
       "1. Attach a CSV file using the paperclip button below.\n" +
       "2. Describe the target column and the ML task — binary classification, multiclass classification, or regression.\n" +
       "3. Say how you'd like the model evaluated (e.g. an 80/20 train/validation split, or 5-fold cross-validation) and which metric matters most (e.g. accuracy, F1, RMSE).\n" +
       "4. Optionally, mention any grouping that must stay together across splits (e.g. patient or subject ID), features to include or exclude, or other constraints.\n\n" +
-      "Once you send your request, I'll analyze the data, design an approach, and run the experiments.",
-  };
+      "Once you send your request, I'll analyze the data, design an approach, and run the experiments."
+  );
 }
 
 export function useAutoMLChat() {
@@ -148,13 +152,7 @@ export function useAutoMLChat() {
             });
             progressMessageIdRef.current = null;
           }
-          addMessage({
-            id: generateId(),
-            role: "assistant",
-            kind: "error",
-            createdAt: new Date().toISOString(),
-            content: message,
-          });
+          addMessage(errorChatMessage(message));
           setRunState("failed");
         },
       });
@@ -191,18 +189,13 @@ export function useAutoMLChat() {
         if (progressMessageIdRef.current) {
           updateMessage(progressMessageIdRef.current, { progressStatus: "done" });
         }
-        const id = generateId();
-        progressMessageIdRef.current = id;
-        addMessage({
-          id,
-          role: "assistant",
-          kind: "progress",
-          createdAt: new Date().toISOString(),
+        const message = progressMessage({
           content: runningContent,
           node: data.node,
           iteration: iterationRef.current,
-          progressStatus: "active",
         });
+        progressMessageIdRef.current = message.id;
+        addMessage(message);
       } else if (progressMessageIdRef.current) {
         updateMessage(progressMessageIdRef.current, { content: runningContent });
       }
@@ -234,17 +227,7 @@ export function useAutoMLChat() {
         if (last && last.kind === "clarification" && last.content === clarificationContent) {
           return prev;
         }
-        return [
-          ...prev,
-          {
-            id: generateId(),
-            role: "assistant",
-            kind: "clarification",
-            createdAt: new Date().toISOString(),
-            content: clarificationContent,
-            node: data.node,
-          },
-        ];
+        return [...prev, clarificationMessage(clarificationContent, data.node)];
       });
       setRunState("awaiting_clarification");
       return;
@@ -255,15 +238,8 @@ export function useAutoMLChat() {
         updateMessage(progressMessageIdRef.current, { progressStatus: "done" });
         progressMessageIdRef.current = null;
       }
-      addMessage({
-        id: generateId(),
-        role: "assistant",
-        kind: "result",
-        createdAt: new Date().toISOString(),
-        // message is the summary of the experimentation process.
-        content: data.message ?? "Your AutoML run has completed.",
-        node: data.node,
-      });
+      // message is the summary of the experimentation process.
+      addMessage(resultMessage(data.message ?? "Your AutoML run has completed.", data.node));
       setRunState("completed");
       return;
     }
@@ -280,14 +256,7 @@ export function useAutoMLChat() {
         });
         progressMessageIdRef.current = null;
       }
-      addMessage({
-        id: generateId(),
-        role: "assistant",
-        kind: "error",
-        createdAt: new Date().toISOString(),
-        content: data.message ?? "The AutoML run failed. Please start a new analysis.",
-        node: data.node,
-      });
+      addMessage(errorChatMessage(data.message ?? "The AutoML run failed. Please start a new analysis.", data.node));
       setRunState("failed");
     }
   }
@@ -296,21 +265,8 @@ export function useAutoMLChat() {
     async (message: string, file: File) => {
       if (isSubmitting) return;
 
-      addMessage({
-        id: generateId(),
-        role: "user",
-        kind: "csv",
-        createdAt: new Date().toISOString(),
-        content: "",
-        attachment: { name: file.name, size: file.size, file, caption: "Uploaded dataset" },
-      });
-      addMessage({
-        id: generateId(),
-        role: "user",
-        kind: "text",
-        createdAt: new Date().toISOString(),
-        content: message,
-      });
+      addMessage(userCsvMessage({ name: file.name, size: file.size, file, caption: "Uploaded dataset" }));
+      addMessage(userTextMessage(message));
 
       setSelectedFile(null);
       setErrorMessage(null);
@@ -338,18 +294,10 @@ export function useAutoMLChat() {
         // handleStreamStatus sees that first real "running" event as a node
         // change from its initial undefined value and creates a duplicate
         // bubble instead of updating this one in place.
-        const progressId = generateId();
-        progressMessageIdRef.current = progressId;
+        const seedMessage = progressMessage({ content: "Getting started...", node: "prompt_agent" });
+        progressMessageIdRef.current = seedMessage.id;
         previousRunningNodeRef.current = "prompt_agent";
-        addMessage({
-          id: progressId,
-          role: "assistant",
-          kind: "progress",
-          createdAt: new Date().toISOString(),
-          content: "Getting started...",
-          node: "prompt_agent",
-          progressStatus: "active",
-        });
+        addMessage(seedMessage);
 
         connectStream(startResult.thread_id);
       } catch (error) {
@@ -358,13 +306,7 @@ export function useAutoMLChat() {
           error,
           "Something went wrong while starting the run."
         );
-        addMessage({
-          id: generateId(),
-          role: "assistant",
-          kind: "error",
-          createdAt: new Date().toISOString(),
-          content: friendly,
-        });
+        addMessage(errorChatMessage(friendly));
         setRunState("failed");
       } finally {
         if (!controller.signal.aborted) setIsSubmitting(false);
@@ -377,13 +319,7 @@ export function useAutoMLChat() {
     async (message: string) => {
       if (isSubmitting || !threadId) return;
 
-      addMessage({
-        id: generateId(),
-        role: "user",
-        kind: "text",
-        createdAt: new Date().toISOString(),
-        content: message,
-      });
+      addMessage(userTextMessage(message));
 
       setErrorMessage(null);
       setIsSubmitting(true);
@@ -402,30 +338,16 @@ export function useAutoMLChat() {
         // for the next event that arrives on it. Seed it with the node that
         // asked for clarification so the pipeline indicator shows the right
         // stage instead of nothing highlighted.
-        const progressId = generateId();
-        progressMessageIdRef.current = progressId;
-        addMessage({
-          id: progressId,
-          role: "assistant",
-          kind: "progress",
-          createdAt: new Date().toISOString(),
-          content: "Resuming...",
-          node: clarificationNodeRef.current,
-          progressStatus: "active",
-        });
+        const seedMessage = progressMessage({ content: "Resuming...", node: clarificationNodeRef.current });
+        progressMessageIdRef.current = seedMessage.id;
+        addMessage(seedMessage);
       } catch (error) {
         if (controller.signal.aborted) return;
         const friendly = toFriendlyMessage(
           error,
           "Something went wrong while resuming the run."
         );
-        addMessage({
-          id: generateId(),
-          role: "assistant",
-          kind: "error",
-          createdAt: new Date().toISOString(),
-          content: friendly,
-        });
+        addMessage(errorChatMessage(friendly));
         setRunState("failed");
       } finally {
         if (!controller.signal.aborted) setIsSubmitting(false);
@@ -465,23 +387,11 @@ export function useAutoMLChat() {
     async (file: File) => {
       if (isPredicting || !threadId) return;
 
-      addMessage({
-        id: generateId(),
-        role: "user",
-        kind: "csv",
-        createdAt: new Date().toISOString(),
-        content: "",
-        attachment: { name: file.name, size: file.size, file, caption: "Prediction input" },
-      });
+      addMessage(userCsvMessage({ name: file.name, size: file.size, file, caption: "Prediction input" }));
 
-      const progressId = generateId();
-      addMessage({
-        id: progressId,
-        role: "assistant",
-        kind: "progress",
-        createdAt: new Date().toISOString(),
-        content: "Generating predictions — this may take a moment.",
-      });
+      const progressMsg = progressMessage({ content: "Generating predictions — this may take a moment." });
+      const progressId = progressMsg.id;
+      addMessage(progressMsg);
 
       setSelectedFile(null);
       setIsPredicting(true);
@@ -490,14 +400,7 @@ export function useAutoMLChat() {
         const csvText = await predict(threadId, file);
         const outputName = file.name.replace(/\.csv$/i, "") + "_predictions.csv";
         removeMessage(progressId);
-        addMessage({
-          id: generateId(),
-          role: "assistant",
-          kind: "csv",
-          createdAt: new Date().toISOString(),
-          content: "",
-          attachment: { name: outputName, csvText, caption: "Predictions" },
-        });
+        addMessage(assistantCsvMessage({ name: outputName, csvText, caption: "Predictions" }));
         await refreshPredictionMetrics(threadId);
       } catch (error) {
         removeMessage(progressId);
@@ -505,13 +408,7 @@ export function useAutoMLChat() {
           error,
           "Something went wrong while generating predictions."
         );
-        addMessage({
-          id: generateId(),
-          role: "assistant",
-          kind: "error",
-          createdAt: new Date().toISOString(),
-          content: friendly,
-        });
+        addMessage(errorChatMessage(friendly));
       } finally {
         setIsPredicting(false);
       }
@@ -613,14 +510,7 @@ export function useAutoMLChat() {
       } else {
         setMessages((prev) => [
           ...prev,
-          {
-            id: generateId(),
-            role: "assistant",
-            kind: "error",
-            createdAt: new Date().toISOString(),
-            content:
-              "Your previous session could not be resumed. Please start a new analysis.",
-          },
+          errorChatMessage("Your previous session could not be resumed. Please start a new analysis."),
         ]);
         setRunState("failed");
       }
@@ -630,14 +520,7 @@ export function useAutoMLChat() {
     ) {
       setMessages((prev) => [
         ...prev,
-        {
-          id: generateId(),
-          role: "assistant",
-          kind: "error",
-          createdAt: new Date().toISOString(),
-          content:
-            "Your previous request was interrupted. Please start a new analysis.",
-        },
+        errorChatMessage("Your previous request was interrupted. Please start a new analysis."),
       ]);
       setRunState("failed");
     } else {
