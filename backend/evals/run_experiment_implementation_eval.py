@@ -1,23 +1,13 @@
-import os
 import json
 import ast
 import re
-import dotenv
-from google import genai
-from pydantic import BaseModel, ValidationError
-from app.services.tracing import traced_interactions_create
+from pydantic import BaseModel
 from app.agents.experiment_agent import ExperimentAgent
 from app.graph.schemas.user_request import UserRequest
 from app.graph.schemas.data_info import DatasetProfile, DatasetAnalysis
 from app.graph.schemas.plan import Plan
 from langsmith import aevaluate
-
-dotenv.load_dotenv()
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-
-client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL = "gemini-3.1-flash-lite"
-MAX_RETRIES = 3
+from evals.utils import llm_judge, dependency_consistency_evaluator
 
 
 async def run_agent(inputs: dict):
@@ -77,30 +67,7 @@ async def plan_adherence(inputs: dict, outputs: dict):
     - Judge whether the code's training setup matches the plan's training_strategy: non-null fields (optimizer, loss, learning_rate, batch_size, epochs, patience, scheduler, gradient_clipping) should be reflected in the code, and fields the plan left null should not be introduced unrequested.
     """
 
-    validation_error = None
-    for attempt in range(MAX_RETRIES + 1):
-        attempt_prompt = prompt
-        if validation_error:
-            attempt_prompt += (
-                f"\n\nYour previous output failed schema validation:\n\n{validation_error}\n\n"
-                "Return a corrected response that strictly matches the required schema."
-            )
-
-        interaction = await traced_interactions_create(
-            client,
-            model=MODEL,
-            input=attempt_prompt,
-            generation_config={'thinking_level': 'low', 'temperature': 0},
-            response_format={'mime_type': 'application/json', 'schema': CodePlanJudgment.model_json_schema()}
-        )
-
-        try:
-            judgment = CodePlanJudgment.model_validate_json(interaction.output_text)
-            break
-        except ValidationError as e:
-            if attempt == MAX_RETRIES:
-                raise
-            validation_error = str(e)
+    judgment = await llm_judge(prompt, CodePlanJudgment)
 
     results = []
 
@@ -179,7 +146,8 @@ if __name__ == '__main__':
         data='automl_experiment_implementation',
         evaluators=[
             plan_adherence,
-            no_rogue_files
+            no_rogue_files,
+            dependency_consistency_evaluator('implementation', ['code']),
         ],
         experiment_prefix='automl_experiment_implementation_eval'
     ))

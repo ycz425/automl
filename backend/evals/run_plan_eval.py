@@ -1,21 +1,11 @@
-import os
 import json
-import dotenv
-from google import genai
-from pydantic import BaseModel, ValidationError
-from app.services.tracing import traced_interactions_create
+from pydantic import BaseModel
 from app.agents.plan_agent import PlanAgent
 from app.graph.schemas.user_request import UserRequest
 from app.graph.schemas.data_info import DatasetProfile, DatasetAnalysis
 from app.graph.schemas.experiment import Experiment
 from langsmith import aevaluate
-
-dotenv.load_dotenv()
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-
-client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL = "gemini-3.1-flash-lite"
-MAX_RETRIES = 3
+from evals.utils import llm_judge
 
 
 async def run_agent(inputs: dict):
@@ -50,6 +40,26 @@ def column_faithfulness(inputs: dict, outputs: dict):
         'key': 'column_faithfulness',
         'score': 1 - len(violations) / len(forbidden),
         'comment': f'Forbidden columns referenced: {violations}' if violations else 'No forbidden columns referenced.'
+    }
+
+
+def plan_completeness(outputs: dict):
+    """Deterministic sanity check that the required narrative fields are actually present and
+    substantive, before spending an LLM call judging their content."""
+    plan = outputs['plan']
+    issues = []
+
+    if len((plan.get('rationale') or '').strip()) < 20:
+        issues.append('rationale is missing or too short')
+    if len((plan.get('architecture_plan') or {}).get('architecture_description', '').strip()) < 20:
+        issues.append('architecture_description is missing or too short')
+    if not plan.get('preprocessing_steps'):
+        issues.append('preprocessing_steps is empty')
+
+    return {
+        'key': 'plan_completeness',
+        'score': 0.0 if issues else 1.0,
+        'comment': '; '.join(issues) if issues else 'Plan includes a rationale, architecture description, and preprocessing steps.'
     }
 
 
@@ -126,30 +136,7 @@ async def plan_judge(inputs: dict, outputs: dict):
       without any justification.
     """
 
-    validation_error = None
-    for attempt in range(MAX_RETRIES + 1):
-        attempt_prompt = prompt
-        if validation_error:
-            attempt_prompt += (
-                f"\n\nYour previous output failed schema validation:\n\n{validation_error}\n\n"
-                "Return a corrected response that strictly matches the required schema."
-            )
-
-        interaction = await traced_interactions_create(
-            client,
-            model=MODEL,
-            input=attempt_prompt,
-            generation_config={'thinking_level': 'low', 'temperature': 0},
-            response_format={'mime_type': 'application/json', 'schema': schema_cls.model_json_schema()}
-        )
-
-        try:
-            judgment = schema_cls.model_validate_json(interaction.output_text)
-            break
-        except ValidationError as e:
-            if attempt == MAX_RETRIES:
-                raise
-            validation_error = str(e)
+    judgment = await llm_judge(prompt, schema_cls)
 
     results = []
 
@@ -188,6 +175,7 @@ if __name__ == '__main__':
         data='automl_plan',
         evaluators=[
             column_faithfulness,
+            plan_completeness,
             plan_judge
         ],
         experiment_prefix='automl_plan_eval'

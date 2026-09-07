@@ -1,21 +1,11 @@
-import os
 import json
 import ast
-import dotenv
-from google import genai
-from pydantic import BaseModel, ValidationError
-from app.services.tracing import traced_interactions_create
+from pydantic import BaseModel
 from app.agents.output_agent import OutputAgent
 from app.graph.schemas.data_info import DatasetAnalysis
 from app.graph.schemas.experiment import Experiment
 from langsmith import aevaluate
-
-dotenv.load_dotenv()
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-
-client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL = "gemini-3.1-flash-lite"
-MAX_RETRIES = 3
+from evals.utils import llm_judge, dependency_consistency_evaluator
 
 
 async def run_agent(inputs: dict):
@@ -66,30 +56,7 @@ async def experiment_adherence(inputs: dict, outputs: dict):
     - Judge whether predict_script applies inference consistently with how train_script fit the pipeline (e.g. it loads and uses the saved pipeline rather than reimplementing preprocessing separately in a way that could drift from what was trained).
     """
 
-    validation_error = None
-    for attempt in range(MAX_RETRIES + 1):
-        attempt_prompt = prompt
-        if validation_error:
-            attempt_prompt += (
-                f"\n\nYour previous output failed schema validation:\n\n{validation_error}\n\n"
-                "Return a corrected response that strictly matches the required schema."
-            )
-
-        interaction = await traced_interactions_create(
-            client,
-            model=MODEL,
-            input=attempt_prompt,
-            generation_config={'thinking_level': 'low', 'temperature': 0},
-            response_format={'mime_type': 'application/json', 'schema': OutputAdherenceJudgment.model_json_schema()}
-        )
-
-        try:
-            judgment = OutputAdherenceJudgment.model_validate_json(interaction.output_text)
-            break
-        except ValidationError as e:
-            if attempt == MAX_RETRIES:
-                raise
-            validation_error = str(e)
+    judgment = await llm_judge(prompt, OutputAdherenceJudgment)
 
     return [
         {'key': 'architecture_adherence', 'score': judgment.architecture_adherence, 'comment': judgment.architecture_reasoning},
@@ -162,6 +129,34 @@ def feature_column_usage(inputs: dict, outputs: dict):
     return results
 
 
+REQUIRED_TRAIN_FLAGS = ['--input', '--output']
+REQUIRED_PREDICT_FLAGS = ['--model', '--input', '--output', '--threshold']
+
+
+def cli_interface_compliance(outputs: dict):
+    """Deterministic, execution-free stand-in for 'the scripts actually run correctly': checks
+    the hard CLI-contract and output-format requirements from the generation prompt directly
+    against the source text, without needing to invoke either script."""
+    scripts = outputs['output_scripts']
+    train_script = scripts['train_script']
+    predict_script = scripts['predict_script']
+
+    missing = [f'train_script missing {flag}' for flag in REQUIRED_TRAIN_FLAGS if flag not in train_script]
+    missing += [f'predict_script missing {flag}' for flag in REQUIRED_PREDICT_FLAGS if flag not in predict_script]
+
+    has_pred_column = "'pred'" in predict_script or '"pred"' in predict_script
+    if not has_pred_column:
+        missing.append("predict_script never references a 'pred' output column")
+
+    total_checks = len(REQUIRED_TRAIN_FLAGS) + len(REQUIRED_PREDICT_FLAGS) + 1
+
+    return {
+        'key': 'cli_interface_compliance',
+        'score': 1 - len(missing) / total_checks,
+        'comment': '; '.join(missing) if missing else 'train/predict scripts expose the required CLI arguments and pred column.'
+    }
+
+
 if __name__ == '__main__':
     import asyncio
 
@@ -171,7 +166,9 @@ if __name__ == '__main__':
         evaluators=[
             experiment_adherence,
             trains_on_full_dataset,
-            feature_column_usage
+            feature_column_usage,
+            cli_interface_compliance,
+            dependency_consistency_evaluator('output_scripts', ['train_script', 'predict_script']),
         ],
         experiment_prefix='automl_output_scripts_eval'
     ))

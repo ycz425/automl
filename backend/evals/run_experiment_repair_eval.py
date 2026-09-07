@@ -1,20 +1,10 @@
-import os
-import dotenv
-from google import genai
-from pydantic import BaseModel, ValidationError
-from app.services.tracing import traced_interactions_create
+from pydantic import BaseModel
 from app.agents.experiment_agent import ExperimentAgent
 from app.graph.schemas.experiment import ExperimentImplementation
 from app.graph.schemas.plan import Plan
 from langsmith import aevaluate
+from evals.utils import llm_judge, dependency_consistency_evaluator
 from evals.run_experiment_implementation_eval import plan_adherence, no_rogue_files
-
-dotenv.load_dotenv()
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-
-client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL = "gemini-3.1-flash-lite"
-MAX_RETRIES = 3
 
 
 async def run_agent(inputs: dict):
@@ -57,30 +47,7 @@ async def addresses_reported_error(inputs: dict, outputs: dict):
     leaving the same issue in place or making an unrelated change that doesn't address it.
     """
 
-    validation_error = None
-    for attempt in range(MAX_RETRIES + 1):
-        attempt_prompt = prompt
-        if validation_error:
-            attempt_prompt += (
-                f"\n\nYour previous output failed schema validation:\n\n{validation_error}\n\n"
-                "Return a corrected response that strictly matches the required schema."
-            )
-
-        interaction = await traced_interactions_create(
-            client,
-            model=MODEL,
-            input=attempt_prompt,
-            generation_config={'thinking_level': 'low', 'temperature': 0},
-            response_format={'mime_type': 'application/json', 'schema': ErrorFixJudgment.model_json_schema()}
-        )
-
-        try:
-            judgment = ErrorFixJudgment.model_validate_json(interaction.output_text)
-            break
-        except ValidationError as e:
-            if attempt == MAX_RETRIES:
-                raise
-            validation_error = str(e)
+    judgment = await llm_judge(prompt, ErrorFixJudgment)
 
     return {'key': 'addresses_reported_error', 'score': judgment.fixes_reported_error, 'comment': judgment.reasoning}
 
@@ -91,6 +58,11 @@ if __name__ == '__main__':
     asyncio.run(aevaluate(
         run_agent,
         data='automl_experiment_repair',
-        evaluators=[plan_adherence, no_rogue_files, addresses_reported_error],
+        evaluators=[
+            plan_adherence,
+            no_rogue_files,
+            dependency_consistency_evaluator('implementation', ['code']),
+            addresses_reported_error,
+        ],
         experiment_prefix='automl_experiment_repair_eval'
     ))

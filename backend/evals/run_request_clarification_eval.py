@@ -1,20 +1,10 @@
-import os
 import json
-import dotenv
-from google import genai
-from pydantic import BaseModel, ValidationError
-from app.services.tracing import traced_interactions_create
+from pydantic import BaseModel
 from app.agents.clarification_agent import ClarificationAgent
 from app.graph.schemas.user_request import UserRequest
 from app.graph.schemas.data_info import DatasetAnalysis
 from langsmith import aevaluate
-
-dotenv.load_dotenv()
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-
-client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL = "gemini-3.1-flash-lite"
-MAX_RETRIES = 3
+from evals.utils import llm_judge
 
 
 async def run_agent(inputs: dict):
@@ -75,30 +65,7 @@ async def clarification_quality(inputs: dict, outputs: dict):
       technical or vague.
     """
 
-    validation_error = None
-    for attempt in range(MAX_RETRIES + 1):
-        attempt_prompt = prompt
-        if validation_error:
-            attempt_prompt += (
-                f"\n\nYour previous output failed schema validation:\n\n{validation_error}\n\n"
-                "Return a corrected response that strictly matches the required schema."
-            )
-
-        interaction = await traced_interactions_create(
-            client,
-            model=MODEL,
-            input=attempt_prompt,
-            generation_config={'thinking_level': 'low', 'temperature': 0},
-            response_format={'mime_type': 'application/json', 'schema': ClarificationQuestionJudgment.model_json_schema()}
-        )
-
-        try:
-            judgment = ClarificationQuestionJudgment.model_validate_json(interaction.output_text)
-            break
-        except ValidationError as e:
-            if attempt == MAX_RETRIES:
-                raise
-            validation_error = str(e)
+    judgment = await llm_judge(prompt, ClarificationQuestionJudgment)
 
     results = []
 
@@ -125,12 +92,35 @@ async def clarification_quality(inputs: dict, outputs: dict):
     return results
 
 
+# Every field name across both clarifiable schemas (UserRequest, DatasetAnalysis) — the prompt
+# explicitly forbids surfacing these (or raw problem wording) to the user, so this is checked
+# directly rather than relying on the LLM judge to catch a leak.
+INTERNAL_FIELD_NAMES = [
+    'task_type', 'target_description', 'group_description', 'include_features',
+    'exclude_features', 'constraints', 'preferences', 'primary_metric',
+    'secondary_metrics', 'evaluation_method', 'validation_size', 'num_folds',
+    'stratify', 'target_column', 'feature_columns', 'excluded_columns',
+    'group_column', 'positive_class',
+]
+
+
+def no_field_name_leakage(outputs: dict):
+    question = outputs['question']
+    leaked = [name for name in INTERNAL_FIELD_NAMES if name in question]
+
+    return {
+        'key': 'no_field_name_leakage',
+        'score': 0.0 if leaked else 1.0,
+        'comment': f'Leaked internal field name(s): {leaked}' if leaked else 'No internal field/schema names leaked into the question.'
+    }
+
+
 if __name__ == '__main__':
     import asyncio
 
     asyncio.run(aevaluate(
         run_agent,
         data='automl_request_clarification',
-        evaluators=[clarification_quality],
+        evaluators=[clarification_quality, no_field_name_leakage],
         experiment_prefix='automl_request_clarification_eval'
     ))

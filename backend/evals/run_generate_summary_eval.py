@@ -1,34 +1,24 @@
-import os
 import json
-import dotenv
-from google import genai
-from pydantic import BaseModel, ValidationError
-from app.services.tracing import traced_interactions_create
-from app.agents.output_agent import OutputAgent
+from pydantic import BaseModel
+from app.agents.summary_agent import SummaryAgent
 from app.graph.schemas.user_request import UserRequest
 from app.graph.schemas.experiment import Experiment
 from langsmith import aevaluate
-
-dotenv.load_dotenv()
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-
-client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL = "gemini-3.1-flash-lite"
-MAX_RETRIES = 3
+from evals.utils import llm_judge
 
 
 async def run_agent(inputs: dict):
-    output_agent = OutputAgent()
+    summary_agent = SummaryAgent()
 
     user_request = UserRequest.model_validate(inputs['user_request'])
     experiments = [Experiment.model_validate(e) for e in inputs['experiments']]
 
-    summary = await output_agent.generate_summary(user_request, experiments)
+    summary = await summary_agent.generate_summary(user_request, experiments)
 
     return {'summary': summary}
 
 
-def _best_experiment_index(user_request: dict, experiments: list[dict]):
+def _best_experiment(user_request: dict, experiments: list[dict]):
     primary_metric = user_request['primary_metric']
     direction = primary_metric['direction']
 
@@ -59,7 +49,7 @@ async def summary_accuracy(inputs: dict, outputs: dict):
     experiments = inputs['experiments']
     summary = outputs['summary']
 
-    best_idx, best_value = _best_experiment_index(user_request, experiments)
+    best_idx, best_value = _best_experiment(user_request, experiments)
     primary_metric = user_request['primary_metric']
 
     prompt = f"""
@@ -86,30 +76,7 @@ async def summary_accuracy(inputs: dict, outputs: dict):
     - Judge whether experiments are described in chronological order using one-based numbering.
     """
 
-    validation_error = None
-    for attempt in range(MAX_RETRIES + 1):
-        attempt_prompt = prompt
-        if validation_error:
-            attempt_prompt += (
-                f"\n\nYour previous output failed schema validation:\n\n{validation_error}\n\n"
-                "Return a corrected response that strictly matches the required schema."
-            )
-
-        interaction = await traced_interactions_create(
-            client,
-            model=MODEL,
-            input=attempt_prompt,
-            generation_config={'thinking_level': 'low', 'temperature': 0},
-            response_format={'mime_type': 'application/json', 'schema': SummaryAccuracyJudgment.model_json_schema()}
-        )
-
-        try:
-            judgment = SummaryAccuracyJudgment.model_validate_json(interaction.output_text)
-            break
-        except ValidationError as e:
-            if attempt == MAX_RETRIES:
-                raise
-            validation_error = str(e)
+    judgment = await llm_judge(prompt, SummaryAccuracyJudgment)
 
     return [
         {
@@ -135,12 +102,36 @@ async def summary_accuracy(inputs: dict, outputs: dict):
     ]
 
 
+def threshold_disclosure(inputs: dict, outputs: dict):
+    """Deterministic complement to summary_accuracy: the best experiment's tuned decision
+    threshold (when there is one) drives deployed predictions, so the prompt requires the
+    summary to state it. Checked by direct substring search rather than an LLM judge."""
+    user_request = inputs['user_request']
+    experiments = inputs['experiments']
+    summary = outputs['summary']
+
+    best_idx, _ = _best_experiment(user_request, experiments)
+    threshold = experiments[best_idx]['result'].get('threshold')
+
+    if threshold is None:
+        return None
+
+    candidates = {str(threshold), f'{threshold:.2f}', f'{threshold:.4f}'}
+    mentioned = any(candidate in summary for candidate in candidates)
+
+    return {
+        'key': 'threshold_disclosure',
+        'score': 1.0 if mentioned else 0.0,
+        'comment': 'Tuned threshold value is stated in the summary.' if mentioned else f'Tuned threshold ({threshold}) is not stated in the summary.'
+    }
+
+
 if __name__ == '__main__':
     import asyncio
 
     asyncio.run(aevaluate(
         run_agent,
         data='automl_generate_summary',
-        evaluators=[summary_accuracy],
+        evaluators=[summary_accuracy, threshold_disclosure],
         experiment_prefix='automl_generate_summary_eval'
     ))

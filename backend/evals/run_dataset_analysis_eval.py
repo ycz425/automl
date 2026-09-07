@@ -19,7 +19,8 @@ key = 'dataset_analysis'
 
 fields = [
     'target_column',
-    'group_column'
+    'group_column',
+    'positive_class'
 ]
 
 list_fields = [
