@@ -3,6 +3,7 @@ from app.graph.schemas.user_request import UserRequest
 from app.graph.schemas.data_info import DatasetProfile, DatasetAnalysis
 from app.graph.schemas.plan import Plan
 from app.graph.schemas.experiment import Experiment
+from app.graph.schemas.research import SearchResult
 from langsmith import traceable
 from datetime import datetime
 import json
@@ -10,7 +11,15 @@ import json
 
 class PlanAgent(LLMAgent):
     @traceable(name="PlanAgent.plan")
-    async def plan(self, user_request: UserRequest, dataset_profile: DatasetProfile, dataset_analysis: DatasetAnalysis, experiments: list[Experiment], max_retries=5):
+    async def plan(
+        self,
+        user_request: UserRequest,
+        dataset_profile: DatasetProfile,
+        dataset_analysis: DatasetAnalysis,
+        experiments: list[Experiment],
+        research: SearchResult | None = None,
+        max_retries=5,
+    ):
         if self.verbose:
             print(f'{datetime.now()}     planning...')
 
@@ -31,6 +40,17 @@ class PlanAgent(LLMAgent):
             "Dataset analysis:\n"
             f"{dataset_analysis.model_dump_json(indent=2)}"
         )
+
+        if research and research.points:
+            prompt += (
+                "\n\nRelevant excerpts retrieved from a research corpus (may or may not be applicable — "
+                "use only what genuinely fits this task, do not fabricate beyond what's stated, and never "
+                "let it override the user's explicit request or the dataset analysis):\n"
+                + "\n\n".join(
+                    f"[{i + 1}] (source: {point.source}, page {point.page_number})\n{point.text}"
+                    for i, point in enumerate(research.points)
+                )
+            )
 
         if experiments:
             prompt += (

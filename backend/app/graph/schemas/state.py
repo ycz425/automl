@@ -3,6 +3,7 @@ from app.graph.schemas.user_request import UserRequest
 from app.graph.schemas.data_info import DatasetProfile, DatasetAnalysis
 from app.graph.schemas.plan import Plan
 from app.graph.schemas.experiment import Experiment
+from app.graph.schemas.research import SearchResult
 from typing import Literal
 
 
@@ -25,6 +26,8 @@ class AutoMLState(BaseModel):
     dataset_analysis: DatasetAnalysis | None = None
 
     split_path: str | None = None
+
+    research: SearchResult | None = None
 
     plan: Plan | None = None
 

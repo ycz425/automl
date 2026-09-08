@@ -15,7 +15,7 @@ async def plan_agent_node(state: AutoMLState):
         print(f'{datetime.now()} [PLAN AGENT] (attempts left: {state.max_replans})')
     plan_agent = PlanAgent(verbose=state.verbose)
 
-    plan = await plan_agent.plan(state.user_request, state.dataset_profile, state.dataset_analysis, state.experiments)
+    plan = await plan_agent.plan(state.user_request, state.dataset_profile, state.dataset_analysis, state.experiments, state.research)
 
     return {
         'plan': plan

@@ -19,6 +19,7 @@ type automl_status = Literal[
 type automl_node = Literal[
     'prompt_agent',
     'data_agent',
+    'research_agent',
     'plan_agent',
     'experiment_agent',
     'output_agent'

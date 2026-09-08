@@ -18,6 +18,7 @@ from app.graph.routers.experiment_router import experiment_router
 from app.graph.routers.clarification_router import clarification_router
 
 from app.graph.context import AutoMLContext
+from app.graph.nodes.research_agent_node import research_agent_node, research_status_update_node
 
 
 def build_graph():
@@ -47,8 +48,12 @@ def build_graph():
 
     builder.add_node('data_splitting', data_splitting_node)
     builder.add_node('plan_agent', plan_agent_node)
+    builder.add_node('research_agent', research_agent_node)
+    builder.add_node('research_status_update', research_status_update_node)
     builder.add_node('plan_status_update', plan_status_update_node)
-    builder.add_edge('data_splitting', 'plan_status_update')
+    builder.add_edge('data_splitting', 'research_status_update')
+    builder.add_edge('research_status_update', 'research_agent')
+    builder.add_edge('research_agent', 'plan_status_update')
     builder.add_edge('plan_status_update', 'plan_agent')
 
     builder.add_node('experiment_agent', experiment_agent_node)
