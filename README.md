@@ -23,8 +23,8 @@ A LangGraph state machine (`backend/app/graph/graph.py`) wires together:
 
 ```
 prompt_agent → data_agent → data_splitting → research_agent → plan_agent ⇄ experiment_agent → output_agent → success
-                    ↑____________________________________________________↑
-                          (either agent can request clarification)
+      ↑_____________↑
+(either agent can request clarification)
 ```
 
 - **`prompt_agent`** (`PromptAgent`) — parses the user's free-text request into a
@@ -36,8 +36,7 @@ prompt_agent → data_agent → data_splitting → research_agent → plan_agent
 - **`research_agent`** (`ResearchAgent`) — runs once per pipeline run, embedding a query
   built from the request and dataset shape (task type, target, class balance, constraints)
   and retrieving relevant excerpts from a Qdrant corpus. The result is stored in state and
-  passed to `plan_agent` on every call, initial plan and every replan alike — not
-  recomputed per replan. Embedding + vector search only, no LLM generation; failures
+  passed to `plan_agent` on every call. Embedding + vector search only, no LLM generation; failures
   degrade gracefully to no research context rather than failing the run.
 - **`plan_agent`** (`PlanAgent`) — proposes a model architecture, preprocessing, and
   training strategy, incorporating cited research excerpts when available; revises the
