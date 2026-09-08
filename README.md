@@ -33,11 +33,12 @@ prompt_agent → data_agent → data_splitting → research_agent → plan_agent
   feature, excluded, and group columns (`DatasetAnalysis`).
 - **`data_splitting`** (`DataSplitter`) — deterministic (no LLM call): builds train/validation
   or cross-validation fold indices from the request's evaluation method.
-- **`research_agent`** (`ResearchAgent`) — embeds a query built from the request and
-  dataset shape (task type, target, class balance, constraints) and retrieves relevant
-  excerpts from a Qdrant corpus to ground `plan_agent`'s first plan. Embedding + vector
-  search only, no LLM generation; failures degrade gracefully to no research context
-  rather than failing the run.
+- **`research_agent`** (`ResearchAgent`) — runs once per pipeline run, embedding a query
+  built from the request and dataset shape (task type, target, class balance, constraints)
+  and retrieving relevant excerpts from a Qdrant corpus. The result is stored in state and
+  passed to `plan_agent` on every call, initial plan and every replan alike — not
+  recomputed per replan. Embedding + vector search only, no LLM generation; failures
+  degrade gracefully to no research context rather than failing the run.
 - **`plan_agent`** (`PlanAgent`) — proposes a model architecture, preprocessing, and
   training strategy, incorporating cited research excerpts when available; revises the
   plan after each experiment.
