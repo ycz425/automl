@@ -10,3 +10,4 @@ langgraph
 langsmith
 scikit-learn
 evidently
+qdrant-client

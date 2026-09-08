@@ -9,10 +9,10 @@ dotenv.load_dotenv(Path(__file__).resolve().parent / '.env')
 
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
-# Unset QDRANT_URL falls back to QDRANT_PATH (on-disk local storage), and unset
+# Unset QDRANT_ENDPOINT falls back to QDRANT_PATH (on-disk local storage), and unset
 # QDRANT_PATH falls back to an in-memory instance — so the pipeline runs with zero
 # Qdrant setup during local development, while still pointing at a real deployment
-# once QDRANT_URL is configured.
+# once QDRANT_ENDPOINT is configured.
 QDRANT_ENDPOINT = os.getenv('QDRANT_ENDPOINT')
 QDRANT_API_KEY = os.getenv('QDRANT_API_KEY')
 QDRANT_PATH = os.getenv('QDRANT_PATH')

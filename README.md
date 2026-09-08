@@ -13,13 +13,17 @@ post-deployment prediction drift monitoring and a human-in-the-loop retraining f
 driving the pipeline, browsing run artifacts, monitoring predictions, and approving
 retraining.
 
+**Ingestion** (`ingestion/`) — standalone PDF-to-Qdrant pipeline (load, chunk, embed,
+upsert) that populates the corpus `research_agent` queries. Decoupled from the backend
+app — no shared imports — so it ships its own `requirements.txt` and `.env`.
+
 ### Pipeline
 
 A LangGraph state machine (`backend/app/graph/graph.py`) wires together:
 
 ```
-prompt_agent → data_agent → data_splitting → plan_agent ⇄ experiment_agent → output_agent → success
-                    ↑______________________________________↑
+prompt_agent → data_agent → data_splitting → research_agent → plan_agent ⇄ experiment_agent → output_agent → success
+                    ↑____________________________________________________↑
                           (either agent can request clarification)
 ```
 
@@ -29,8 +33,14 @@ prompt_agent → data_agent → data_splitting → plan_agent ⇄ experiment_age
   feature, excluded, and group columns (`DatasetAnalysis`).
 - **`data_splitting`** (`DataSplitter`) — deterministic (no LLM call): builds train/validation
   or cross-validation fold indices from the request's evaluation method.
+- **`research_agent`** (`ResearchAgent`) — embeds a query built from the request and
+  dataset shape (task type, target, class balance, constraints) and retrieves relevant
+  excerpts from a Qdrant corpus to ground `plan_agent`'s first plan. Embedding + vector
+  search only, no LLM generation; failures degrade gracefully to no research context
+  rather than failing the run.
 - **`plan_agent`** (`PlanAgent`) — proposes a model architecture, preprocessing, and
-  training strategy; revises the plan after each experiment.
+  training strategy, incorporating cited research excerpts when available; revises the
+  plan after each experiment.
 - **`experiment_agent`** (`ExperimentAgent`) — generates and runs the experiment code for a
   plan, repairing it on failure, and loops back to `plan_agent` until the pipeline decides
   to stop.
@@ -42,8 +52,9 @@ prompt_agent → data_agent → data_splitting → plan_agent ⇄ experiment_age
   when `prompt_agent`/`data_agent` can't resolve something, and applies their answer back
   onto the structured data.
 
-Every agent inherits from `LLMAgent` (`app/agents/base.py`), which owns the Gemini client
-and a shared `generate_structured(...)` retry-until-schema-valid helper
+Every agent except `DataSplitter` and `ResearchAgent` (neither needs LLM generation)
+inherits from `LLMAgent` (`app/agents/base.py`), which owns the Gemini client and a
+shared `generate_structured(...)` retry-until-schema-valid helper
 (`app/utils/structured_generation.py`).
 
 ### Post-deployment features
@@ -90,6 +101,8 @@ Environment variables (`.env` in `backend/`):
 | `GOOGLE_CLOUD_PROJECT` | GCP project for Firestore run metadata |
 | `LANGSMITH_API_KEY` | Tracing and eval-suite access (optional but recommended) |
 | `LANGSMITH_PROJECT` | LangSmith project name for traces/evals |
+| `QDRANT_ENDPOINT` / `QDRANT_API_KEY` | Qdrant cluster `research_agent` queries |
+| `EMBEDDING_MODEL` / `EMBEDDING_DIMENSIONS` / `EMBEDDING_TPM_LIMIT` | `research_agent`'s embedding config — defaults to `gemini-embedding-001` at 768 dims, 30k TPM |
 
 ### Frontend
 
@@ -99,12 +112,29 @@ npm install
 npm run dev
 ```
 
+### Ingestion
+
+```bash
+pip install -r ingestion/requirements.txt
+python -m ingestion.pipeline path/to/file.pdf --collection my_collection   # run from the repo root
+```
+
+Environment variables (`.env` in `ingestion/`):
+
+| Variable | Purpose |
+|---|---|
+| `GEMINI_API_KEY` | Gemini embeddings API access |
+| `QDRANT_ENDPOINT` / `QDRANT_API_KEY` | Qdrant deployment to upsert into — omit both to fall back to `QDRANT_PATH` (on-disk) or an in-memory instance |
+| `EMBEDDING_MODEL` / `EMBEDDING_DIMENSIONS` | Defaults to `gemini-embedding-001` at 768 dimensions |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | Defaults to 1000/200 characters |
+
 ## Repo layout
 
 ```
 backend/
   app/
-    agents/       # LLMAgent subclasses — one per pipeline stage
+    agents/       # one class per pipeline stage — most subclass LLMAgent; DataSplitter
+                  # and ResearchAgent don't need generation
     graph/        # LangGraph state machine: graph.py, nodes/, routers/, schemas/
     services/     # FileStorage, PredictionService, RetrainService, status tracking, tracing
     utils/        # shared structured-generation + subprocess/model-script helpers
@@ -116,4 +146,5 @@ frontend/
     hooks/        # chat state, retrain flow
     types/        # shared TS types
     utils/        # chat message factories, formatting helpers
+ingestion/        # standalone PDF -> chunk -> embed -> Qdrant upsert pipeline
 ```
