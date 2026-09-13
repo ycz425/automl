@@ -20,10 +20,12 @@ QDRANT_PATH = os.getenv('QDRANT_PATH')
 EMBEDDING_MODEL = os.getenv('EMBEDDING_MODEL', 'gemini-embedding-001')
 EMBEDDING_DIMENSIONS = int(os.getenv('EMBEDDING_DIMENSIONS', '768'))
 
-# Tokens-per-minute quota for EMBEDDING_MODEL on this API key/project — embed_texts()
-# batches and paces requests to stay under this. Set to your actual quota (visible on
-# the Google AI Studio / Cloud Console quota page) if it differs from the default.
+# Tokens-per-minute and requests-per-minute quotas for EMBEDDING_MODEL on this API
+# key/project — embed_texts() paces batches to stay under both. Defaults match the
+# Gemini API free tier (30k TPM, 15 RPM); raise these if billing is enabled and the
+# account has higher limits (see https://ai.dev/rate-limit for your actual quota).
 EMBEDDING_TPM_LIMIT = int(os.getenv('EMBEDDING_TPM_LIMIT', '30000'))
+EMBEDDING_RPM_LIMIT = int(os.getenv('EMBEDDING_RPM_LIMIT', '15'))
 
 DEFAULT_CHUNK_SIZE = int(os.getenv('CHUNK_SIZE', '2000'))
 DEFAULT_CHUNK_OVERLAP = int(os.getenv('CHUNK_OVERLAP', '500'))

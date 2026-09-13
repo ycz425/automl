@@ -4,15 +4,19 @@ from pathlib import Path
 from ingestion.loader import load_pdf
 from ingestion.chunker import chunk_pages
 from ingestion.embedder import embed_texts
-from ingestion.store import get_client, ensure_collection, upsert_chunks
-from ingestion.config import DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP
+from ingestion.store import get_client, ensure_collection, upsert_chunks, existing_chunk_indices
+from ingestion.config import DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP, EMBEDDING_DIMENSIONS
 
 # embed_texts() already retries individual embedding calls internally (see
-# EMBEDDING_TPM_LIMIT pacing + 429 backoff in embedder.py); this is an outer safety net
-# for when a whole PDF still fails — a rate limit that outlasts embed_texts' own retry
-# budget, a dropped connection during upsert, etc. — so one bad file doesn't abort a
-# large batch. A file that's still failing after this many attempts (e.g. a genuinely
-# corrupt PDF) is skipped rather than retried forever.
+# EMBEDDING_TPM_LIMIT/EMBEDDING_RPM_LIMIT pacing + 429 backoff in embedder.py); this is
+# an outer safety net for when a whole PDF still fails — a rate limit that outlasts
+# embed_texts' own retry budget, a dropped connection during upsert, etc. — so one bad
+# file doesn't abort a large batch. ingest_pdf() upserts each batch as soon as it's
+# embedded (see on_batch below) and point IDs are deterministic per (source, chunk
+# index), so re-running a partially-succeeded PDF here just overwrites already-upserted
+# chunks in place rather than duplicating or losing them. A file that's still failing
+# after this many attempts (e.g. a genuinely corrupt PDF) is skipped rather than
+# retried forever.
 _MAX_FILE_RETRIES = 3
 _FILE_RETRY_DELAY_SECONDS = 60
 
@@ -41,16 +45,37 @@ def ingest_pdf(
     if not chunks:
         return 0
 
-    vectors = embed_texts([chunk.text for chunk in chunks])
-
     client = client or get_client()
-    ensure_collection(client, collection_name, vector_size=len(vectors[0]))
-    count = upsert_chunks(client, collection_name, chunks, vectors, source=source)
+    ensure_collection(client, collection_name, vector_size=EMBEDDING_DIMENSIONS)
 
-    if verbose:
-        print(f'Upserted {count} point(s) into collection "{collection_name}"')
+    done = existing_chunk_indices(client, collection_name, source, len(chunks))
+    pending = [(i, chunk) for i, chunk in enumerate(chunks) if i not in done]
 
-    return count
+    if not pending:
+        if verbose:
+            print(f'  All {len(chunks)} chunk(s) already upserted, nothing to embed.')
+        return len(chunks)
+
+    if done and verbose:
+        print(f'  Resuming: {len(done)} chunk(s) already upserted, {len(pending)} remaining.')
+
+    upserted = 0
+
+    def on_batch(subset_start: int, batch_texts: list[str], batch_vectors: list[list[float]]):
+        nonlocal upserted
+        batch_items = pending[subset_start:subset_start + len(batch_texts)]
+        batch_chunks = [chunk for _, chunk in batch_items]
+        batch_indices = [i for i, _ in batch_items]
+        upserted += upsert_chunks(
+            client, collection_name, batch_chunks, batch_vectors,
+            source=source, indices=batch_indices,
+        )
+        if verbose:
+            print(f'  Upserted {len(done) + upserted}/{len(chunks)} point(s) so far into "{collection_name}"')
+
+    embed_texts([chunk.text for _, chunk in pending], on_batch=on_batch)
+
+    return len(done) + upserted
 
 
 def _ingest_pdf_with_retry(
