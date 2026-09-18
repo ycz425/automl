@@ -273,6 +273,17 @@ export function useAutoMLChat() {
       setIsSubmitting(true);
       setRunState("uploading");
 
+      // The upload + start-run round trip is the very first request of a
+      // session, so it's the one most likely to land on a cold backend
+      // instance — with nothing else in the transcript yet, a silent
+      // multi-second wait here reads as a dead app. Show something
+      // immediately and let the real flow below replace it.
+      const startingMessage = progressMessage({
+        label: "Starting up...",
+        content: "This may take a little longer than usual if the server was idle.",
+      });
+      addMessage(startingMessage);
+
       const controller = new AbortController();
       abortControllerRef.current = controller;
 
@@ -294,6 +305,7 @@ export function useAutoMLChat() {
         // handleStreamStatus sees that first real "running" event as a node
         // change from its initial undefined value and creates a duplicate
         // bubble instead of updating this one in place.
+        removeMessage(startingMessage.id);
         const seedMessage = progressMessage({ content: "Getting started...", node: "prompt_agent" });
         progressMessageIdRef.current = seedMessage.id;
         previousRunningNodeRef.current = "prompt_agent";
@@ -302,6 +314,7 @@ export function useAutoMLChat() {
         connectStream(startResult.thread_id);
       } catch (error) {
         if (controller.signal.aborted) return;
+        removeMessage(startingMessage.id);
         const friendly = toFriendlyMessage(
           error,
           "Something went wrong while starting the run."
@@ -312,7 +325,7 @@ export function useAutoMLChat() {
         if (!controller.signal.aborted) setIsSubmitting(false);
       }
     },
-    [isSubmitting, addMessage, connectStream]
+    [isSubmitting, addMessage, removeMessage, connectStream]
   );
 
   const resumeRun = useCallback(
@@ -324,6 +337,15 @@ export function useAutoMLChat() {
       setErrorMessage(null);
       setIsSubmitting(true);
       setRunState("resuming");
+
+      // Same cold-start concern as startRun: the backend may have scaled to
+      // zero while waiting on the user's clarification reply, so this
+      // request can stall for several seconds with nothing on screen yet.
+      const startingMessage = progressMessage({
+        label: "Resuming...",
+        content: "This may take a little longer than usual if the server was idle.",
+      });
+      addMessage(startingMessage);
 
       const controller = new AbortController();
       abortControllerRef.current = controller;
@@ -338,11 +360,13 @@ export function useAutoMLChat() {
         // for the next event that arrives on it. Seed it with the node that
         // asked for clarification so the pipeline indicator shows the right
         // stage instead of nothing highlighted.
+        removeMessage(startingMessage.id);
         const seedMessage = progressMessage({ content: "Resuming...", node: clarificationNodeRef.current });
         progressMessageIdRef.current = seedMessage.id;
         addMessage(seedMessage);
       } catch (error) {
         if (controller.signal.aborted) return;
+        removeMessage(startingMessage.id);
         const friendly = toFriendlyMessage(
           error,
           "Something went wrong while resuming the run."
@@ -353,7 +377,7 @@ export function useAutoMLChat() {
         if (!controller.signal.aborted) setIsSubmitting(false);
       }
     },
-    [isSubmitting, threadId, addMessage]
+    [isSubmitting, threadId, addMessage, removeMessage]
   );
 
   const refreshPredictionMetrics = useCallback(async (activeThreadId: string) => {

@@ -30,7 +30,8 @@ def build_graph():
             ("app.graph.schemas.clarification_request", "ClarificationRequest"),
             ("app.graph.schemas.clarification_request", "GeneratedClarificationRequest"),
             ("app.graph.schemas.plan", "Plan"),
-            ('app.graph.schemas.experiment', 'Experiment')
+            ('app.graph.schemas.experiment', 'Experiment'),
+            ('app.graph.schemas.research', 'SearchResult')
         ]
     )
 

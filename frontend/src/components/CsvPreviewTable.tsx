@@ -16,7 +16,7 @@ export function CsvPreviewTable({ columns, rows, totalRowCount }: CsvPreviewTabl
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="max-h-80 overflow-auto rounded-lg border border-neutral-700">
+      <div className="scrollbar-fade max-h-80 overflow-auto overscroll-y-contain rounded-lg border border-neutral-700">
         <table className="w-full min-w-max border-collapse text-left text-xs">
           <thead className="sticky top-0 bg-neutral-800 text-neutral-300">
             <tr>

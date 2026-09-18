@@ -40,9 +40,28 @@
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-neutral-700;
   }
+
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }
 
 @layer components {
+  /* Scrollbar stays invisible until the container is hovered or actively scrolled. */
+  .scrollbar-fade {
+    scrollbar-gutter: stable;
+  }
+
+  .scrollbar-fade::-webkit-scrollbar-thumb {
+    background: transparent;
+    transition: background-color 0.2s ease;
+  }
+
+  .scrollbar-fade:hover::-webkit-scrollbar-thumb,
+  .scrollbar-fade:focus-within::-webkit-scrollbar-thumb {
+    @apply bg-neutral-700;
+  }
+
   .markdown-body {
     @apply text-neutral-200;
   }
