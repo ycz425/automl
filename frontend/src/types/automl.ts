@@ -27,6 +27,7 @@ export type AutoMLStatus =
 export type AutoMLNode =
   | "prompt_agent"
   | "data_agent"
+  | "research_agent"
   | "plan_agent"
   | "experiment_agent"
   | "output_agent";
@@ -98,6 +99,7 @@ export type RetrainEvaluateResponse = {
 export const PIPELINE_NODES: AutoMLNode[] = [
   "prompt_agent",
   "data_agent",
+  "research_agent",
   "plan_agent",
   "experiment_agent",
   "output_agent",
@@ -106,6 +108,7 @@ export const PIPELINE_NODES: AutoMLNode[] = [
 export const NODE_LABELS: Record<AutoMLNode, string> = {
   prompt_agent: "Understanding your request",
   data_agent: "Analyzing the dataset",
+  research_agent: "Researching relevant approaches",
   plan_agent: "Designing the ML approach",
   experiment_agent: "Training and evaluating models",
   output_agent: "Preparing the final results",
