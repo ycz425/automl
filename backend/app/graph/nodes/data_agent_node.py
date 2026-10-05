@@ -23,7 +23,7 @@ async def data_agent_node(state: AutoMLState, runtime: Runtime[AutoMLContext]):
     dataset_analysis= await data_agent.analyse_profile(state.user_request, dataset_profile)
 
 
-    problems = dataset_analysis.problems(state.user_request)
+    problems = dataset_analysis.problems(state)
 
     return {
         'dataset_profile': dataset_profile,

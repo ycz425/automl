@@ -1,8 +1,9 @@
 from app.agents.base import LLMAgent
 from app.services.tracing import traced_interactions_create
-from app.graph.schemas.clarifiable_model import ClarifiableModel
+from app.graph.schemas.clarification import ClarifiableModel, Clarifications
 from langsmith import traceable
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
+from datetime import datetime
 import json
 
 
@@ -33,17 +34,16 @@ class ClarificationAgent(LLMAgent):
             input=prompt,
             previous_interaction_id=interaction_id,
             generation_config={
-                'thinking_level': 'low',
-                'temperature': 0
+                'thinking_level': 'low'
             }
         )
 
         return interaction.output_text, interaction.id
 
     @traceable(name="ClarificationAgent.apply_clarification")
-    async def apply_clarification(self, data: ClarifiableModel, question: str, problems: list[str], clarification: str, max_retries=5):
+    async def apply_clarification[T: ClarifiableModel](self, data: T, question: str, problems: list[str], clarification: str, max_retries=5, max_merge_retries=2) -> T:
         prompt = f"""
-        Update the existing data using the user's clarification.
+        Determine which field(s) of the existing data the user's clarification changes, and the new value of each.
 
         Existing data:
         {data.model_dump_json(indent=2)}
@@ -58,12 +58,32 @@ class ClarificationAgent(LLMAgent):
         {clarification}
 
         Requirements:
-        - Update only the relevant field(s).
-        - Preserve all unrelated fields exactly.
+        - Return an entry only for each field that the user's clarification changes. Fields that are not returned keep their existing values, so never return a field just to repeat its current value.
+        - Each new value replaces the field's whole existing value and must have the same shape as it (e.g. a complete list for a list field).
         - Interpret the user's clarification in the context of the clarification question and detected problems.
         - Do not invent information not provided by the user.
-        - If the clarification is insufficient, leave the field unresolved.
-        - Return only complete output matching the required schema.
+        - If the clarification is insufficient, return no entries.
         """
 
-        return await self.generate_structured(prompt, type(data), max_retries=max_retries, label=type(data).__name__)
+        schema = Clarifications[type(data).clarifiable_fields]
+        merge_error: str | None = None
+        for attempt in range(max_merge_retries + 1):
+            full_prompt = prompt
+            if merge_error:
+                full_prompt += (
+                    "\nYour previous update produced invalid data when applied to the existing data:\n"
+                    f"{merge_error}\n"
+                    "Return corrected entries whose new values match the field types.\n"
+                )
+
+            patch = await self.generate_structured(full_prompt, schema, max_retries=max_retries, label=type(data).__name__)
+            updates = {c.field: c.new_value for c in patch.clarifications}
+
+            try:
+                return type(data).model_validate({**data.model_dump(), **updates})
+            except ValidationError as e:
+                if attempt == max_merge_retries:
+                    raise
+                merge_error = str(e)
+                if self.verbose:
+                    print(f'{datetime.now()}     clarification update invalid - retrying... (attempt: {attempt + 1}/{max_merge_retries})')

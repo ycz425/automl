@@ -16,7 +16,7 @@ async def prompt_agent_node(state: AutoMLState):
     prompt_agent = PromptAgent(verbose=state.verbose)
     user_request = await prompt_agent.parse(state.user_input)
 
-    problems = user_request.problems()
+    problems = user_request.problems(state)
 
     return {
         'user_request': user_request,

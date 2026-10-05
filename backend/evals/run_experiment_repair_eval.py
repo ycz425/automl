@@ -24,8 +24,8 @@ async def run_agent(inputs: dict):
 
 
 class ErrorFixJudgment(BaseModel):
-    fixes_reported_error: bool
     reasoning: str
+    fixes_reported_error: bool
 
 
 async def addresses_reported_error(inputs: dict, outputs: dict):

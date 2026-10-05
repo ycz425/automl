@@ -34,14 +34,14 @@ def _best_experiment(user_request: dict, experiments: list[dict]):
 
 
 class SummaryAccuracyJudgment(BaseModel):
-    identifies_correct_best_experiment: bool
     identifies_correct_best_experiment_reasoning: str
-    states_correct_metric_value: bool
+    identifies_correct_best_experiment: bool
     states_correct_metric_value_reasoning: str
-    no_fabrication: bool
+    states_correct_metric_value: bool
     no_fabrication_reasoning: str
-    correct_ordering_and_numbering: bool
+    no_fabrication: bool
     correct_ordering_and_numbering_reasoning: str
+    correct_ordering_and_numbering: bool
 
 
 async def summary_accuracy(inputs: dict, outputs: dict):
@@ -56,7 +56,10 @@ async def summary_accuracy(inputs: dict, outputs: dict):
     Judge whether the following summary of a machine-learning experimentation process is
     factually accurate, given the ground truth below.
 
-    Ground truth:
+    Ground truth. The summary was written from exactly this information (the user request AND
+    the experiments), so any fact stated in the summary that appears in either is NOT fabricated:
+    - User request (the user's goal, constraints, preferences, and evaluation setup):
+      {json.dumps(user_request, indent=2)}
     - Primary metric: {primary_metric['name']} ({primary_metric['direction']})
     - Experiments, in chronological order (zero-based list here, but the summary should refer
       to them using one-based numbering, e.g. index 0 is "Experiment 1"):
@@ -71,8 +74,9 @@ async def summary_accuracy(inputs: dict, outputs: dict):
     - Judge whether the summary correctly identifies Experiment {best_idx + 1} as the best experiment.
     - Judge whether the summary states the correct {primary_metric['name']} value ({best_value}) for
       the best experiment, allowing for reasonable rounding.
-    - Judge whether the summary avoids fabricating any approach, metric, or number not present in
-      the experiments list above.
+    - Judge whether the summary avoids fabricating any goal, constraint, evaluation detail,
+      approach, metric, or number that appears in neither the user request nor the experiments
+      list above. Restating or paraphrasing the user request is not fabrication.
     - Judge whether experiments are described in chronological order using one-based numbering.
     """
 

@@ -1,15 +1,9 @@
 from pydantic import BaseModel, Field
-from app.graph.schemas.clarifiable_model import ClarifiableModel
-from typing import Literal
+from app.graph.schemas.clarification import ClarifiableModel
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-type ClarifiableField = Literal[
-    'task_type',
-    'target_description',
-    'include_features',
-    'exclude_features',
-    'primary_metric',
-    'evaluation_method'
-]
+if TYPE_CHECKING:
+    from app.graph.schemas.state import AutoMLState  # state.py imports these schemas, so import it for typing only
 
 type TaskType = Literal[
     'binary_classification',
@@ -44,8 +38,17 @@ class UserRequest(ClarifiableModel):
     validation_size: float | None = Field(default=None, gt=0, lt=1, description="Proportion of observations assigned to the validation set. Return null if evaluation_method is not train_validation_split.")
     num_folds: int | None = Field(default=None, ge=3, description="Number of cross-validation folds. Return null if evaluation_method is not k_fold_cross_validation.")
     stratify: bool | None = Field(default=None, description="Whether class proportions should be preserved across splits. Return true if the user does not specify a stratification. Return null if evaluation_method is leave_one_group_out or task_type is regression.")
+
+    clarifiable_fields: ClassVar[Any] = Literal[
+        'task_type',
+        'target_description',
+        'include_features',
+        'exclude_features',
+        'primary_metric',
+        'evaluation_method'
+    ]
     
-    def problems(self):
+    def problems(self, state: "AutoMLState"):
         problems = []
         if self.task_type is None:
             problems.append('task_type is unspecified')

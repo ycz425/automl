@@ -32,17 +32,17 @@ async def apply_clarification_node(state: AutoMLState):
         print(f'{datetime.now()}     clarifying... (attempts left: {state.clarification_retries})')
     clarification_agent = ClarificationAgent(verbose=state.verbose)
 
-    clarified_data = await clarification_agent.apply_clarification(
+    data = await clarification_agent.apply_clarification(
         getattr(state, state.pending_clarification),
         state.clarification_request,
         state.problems,
         user_clarification,
     )
 
-    problems = clarified_data.problems()
+    problems = data.problems(state)
 
     return {
-        state.pending_clarification: clarified_data,
+        state.pending_clarification: data,
         'pending_clarification': state.pending_clarification if problems else None,
         'problems': problems,
         'clarification_request': None,

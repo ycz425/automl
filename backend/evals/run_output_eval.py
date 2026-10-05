@@ -20,14 +20,16 @@ async def run_agent(inputs: dict):
 
 
 class OutputAdherenceJudgment(BaseModel):
-    architecture_adherence: bool
     architecture_reasoning: str
-    hyperparameter_adherence: bool
+    architecture_adherence: bool
     hyperparameter_reasoning: str
-    preprocessing_adherence: bool
+    hyperparameter_adherence: bool
     preprocessing_reasoning: str
-    predict_train_consistency: bool
+    preprocessing_adherence: bool
     predict_train_reasoning: str
+    predict_train_consistency: bool
+    input_columns_reasoning: str
+    uses_only_allowed_input_columns: bool
 
 
 async def experiment_adherence(inputs: dict, outputs: dict):
@@ -37,11 +39,19 @@ async def experiment_adherence(inputs: dict, outputs: dict):
     prompt = f"""
     Judge whether the following train/predict scripts correctly reproduce the selected experiment they were derived from.
 
-    Selected experiment's original implementation code:
+    The original implementation code below is the REFERENCE: it is what was actually run and
+    produced the experiment's results, so "reproducing the experiment" means reproducing that code.
+    The plan is background context only — if the plan and the code disagree, judge against the
+    code, never against the plan.
+
+    Selected experiment's original implementation code (the reference):
     {experiment['implementation']['code']}
 
-    Selected experiment's plan (for architecture and hyperparameter intent):
+    Selected experiment's plan (context only):
     {json.dumps(experiment['plan'], indent=2)}
+
+    Dataset analysis (which columns may be used as model inputs):
+    {json.dumps(inputs['dataset_analysis'], indent=2)}
 
     Generated train_script:
     {output_scripts['train_script']}
@@ -53,6 +63,7 @@ async def experiment_adherence(inputs: dict, outputs: dict):
     - Judge whether the model architecture in train_script matches the original implementation's architecture, not a different but plausible choice.
     - Judge whether the hyperparameter values in train_script match the original implementation's hyperparameter values, not just the same class name with different values.
     - Judge whether the preprocessing and feature selection in train_script matches the original implementation exactly.
+    - Judge whether the scripts use ONLY the dataset analysis's feature_columns as model input features. The target column may be read to build labels, and excluded/group columns may be mentioned in order to drop them, but none of the target, excluded_columns, or group_column may be used as an input feature to the model.
     - Judge whether predict_script applies inference consistently with how train_script fit the pipeline (e.g. it loads and uses the saved pipeline rather than reimplementing preprocessing separately in a way that could drift from what was trained).
     """
 
@@ -63,6 +74,7 @@ async def experiment_adherence(inputs: dict, outputs: dict):
         {'key': 'hyperparameter_adherence', 'score': judgment.hyperparameter_adherence, 'comment': judgment.hyperparameter_reasoning},
         {'key': 'preprocessing_adherence', 'score': judgment.preprocessing_adherence, 'comment': judgment.preprocessing_reasoning},
         {'key': 'predict_train_consistency', 'score': judgment.predict_train_consistency, 'comment': judgment.predict_train_reasoning},
+        {'key': 'feature_column_faithfulness', 'score': judgment.uses_only_allowed_input_columns, 'comment': judgment.input_columns_reasoning},
     ]
 
 
@@ -96,37 +108,20 @@ def trains_on_full_dataset(outputs: dict):
 
 
 def feature_column_usage(inputs: dict, outputs: dict):
-    dataset_analysis = inputs['dataset_analysis']
-    output_scripts = outputs['output_scripts']
+    """Every feature column should appear somewhere in the scripts. (Whether forbidden columns are
+    *used as inputs* is judged semantically in experiment_adherence — a plain substring match
+    flagged legitimate mentions, like reading the target to build labels or dropping an ID column.)"""
+    feature_columns = set(inputs['dataset_analysis'].get('feature_columns', []))
+    if not feature_columns:
+        return None
 
-    feature_columns = set(dataset_analysis.get('feature_columns', []))
-    forbidden = set(dataset_analysis.get('excluded_columns', []))
-    if dataset_analysis.get('target_column'):
-        forbidden.add(dataset_analysis['target_column'])
-    if dataset_analysis.get('group_column'):
-        forbidden.add(dataset_analysis['group_column'])
-
-    text = output_scripts['train_script'] + ' ' + output_scripts['predict_script']
-
-    results = []
-
-    if feature_columns:
-        unused = sorted(col for col in feature_columns if col not in text)
-        results.append({
-            'key': 'feature_column_completeness',
-            'score': 1 - len(unused) / len(feature_columns),
-            'comment': f'Feature columns never referenced: {unused}' if unused else 'All feature columns referenced.'
-        })
-
-    if forbidden:
-        violations = sorted(col for col in forbidden if col in text)
-        results.append({
-            'key': 'feature_column_faithfulness',
-            'score': 1 - len(violations) / len(forbidden),
-            'comment': f'Forbidden columns referenced: {violations}' if violations else 'No forbidden columns referenced.'
-        })
-
-    return results
+    text = outputs['output_scripts']['train_script'] + ' ' + outputs['output_scripts']['predict_script']
+    unused = sorted(col for col in feature_columns if col not in text)
+    return {
+        'key': 'feature_column_completeness',
+        'score': 1 - len(unused) / len(feature_columns),
+        'comment': f'Feature columns never referenced: {unused}' if unused else 'All feature columns referenced.'
+    }
 
 
 REQUIRED_TRAIN_FLAGS = ['--input', '--output']

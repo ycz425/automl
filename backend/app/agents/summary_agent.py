@@ -42,8 +42,7 @@ class SummaryAgent(LLMAgent):
             model=self.model,
             input=prompt,
             generation_config={
-                'thinking_level': 'low',
-                'temperature': 0
+                'thinking_level': 'low'
             }
         )
 

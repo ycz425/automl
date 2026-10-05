@@ -28,16 +28,16 @@ async def run_agent(inputs: dict):
 
 class ProblemCoverageJudgment(BaseModel):
     problem: str
-    addressed: bool
     reasoning: str
+    addressed: bool
 
 
 class ClarificationQuestionJudgment(BaseModel):
     problem_coverage: list[ProblemCoverageJudgment]
-    introduces_unrelated_asks: bool
     unrelated_asks_reasoning: str
-    is_clear_and_concise: bool
+    introduces_unrelated_asks: bool
     clarity_reasoning: str
+    is_clear_and_concise: bool
 
 
 async def clarification_quality(inputs: dict, outputs: dict):

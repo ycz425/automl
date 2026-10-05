@@ -1,12 +1,10 @@
 from pydantic import BaseModel, Field
-from typing import Any, Literal
-from app.graph.schemas.clarifiable_model import ClarifiableModel
-from app.graph.schemas.user_request import UserRequest
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-type ClarifiableField = Literal[
-    'target_column',
-    'group_column'
-]
+if TYPE_CHECKING:
+    from app.graph.schemas.state import AutoMLState  # state.py imports these schemas, so import it for typing only
+from app.graph.schemas.clarification import ClarifiableModel
+
 
 type FeatureType = Literal[
     'numerical',
@@ -42,7 +40,14 @@ class DatasetAnalysis(ClarifiableModel):
     group_column: str | None = Field(default=None, description="Column defining groups that must remain entirely within one split, such as subject, patient, or recording ID. Return null if user request does not specify any group or it cannot be confidently determined from the column name.")
     positive_class: str | None = Field(default=None, description="The value in the target column representing the positive class (the outcome of interest, e.g. 'fraud' rather than 'legitimate', or 'churn' rather than 'retained') — used to compute precision, recall, F1, and to apply the tuned decision threshold. Must be one of the actual values found in the target column. Only applicable when the task is binary classification; return null for regression or multiclass classification, or if it cannot be confidently determined from the target column's values and the user's request.")
 
-    def problems(self, user_request: UserRequest):
+    clarifiable_fields: ClassVar[Any] = Literal[
+        'target_column',
+        'group_column',
+        'positive_class'
+    ]
+
+    def problems(self, state: "AutoMLState"):
+        user_request = state.user_request
         problems = []
         if self.target_column is None:
             problems.append("target_column cannot be determined based on dataset column names.")

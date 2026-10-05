@@ -21,7 +21,9 @@ class PromptAgent(LLMAgent):
         Instructions:
         - Extract only information explicitly stated by the user.
         - Do not infer dataset columns or invent missing details.
-        - Leave fields null if they are unknown.
+        - Leave fields null if they are unknown, except where the schema documents a default
+          (e.g. stratify defaults to true for classification when the user doesn't say otherwise,
+          and secondary_metrics must always get sensible task-appropriate defaults).
         - Keep assumptions to an absolute minimum.
         - Produce only valid JSON matching the provided schema.
         """

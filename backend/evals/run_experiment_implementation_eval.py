@@ -33,16 +33,16 @@ async def run_agent(inputs: dict):
 
 class PreprocessingStepJudgment(BaseModel):
     step: str
-    implemented: bool
     reasoning: str
+    implemented: bool
 
 
 class CodePlanJudgment(BaseModel):
     preprocessing_step_judgments: list[PreprocessingStepJudgment]
-    architecture_adherence: bool
     architecture_reasoning: str
-    training_strategy_adherence: bool
+    architecture_adherence: bool
     training_strategy_reasoning: str
+    training_strategy_adherence: bool
 
 
 async def plan_adherence(inputs: dict, outputs: dict):
